@@ -86,6 +86,58 @@ static void test_enter_and_leave_raw_restores_terminal(void) {
 	close(slave);
 }
 
+static void test_editor_init_zeroes_buffer(void) {
+	editor_t e;
+	memset(&e, 0xFF, sizeof(e));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, e.len);
+	TEST_ASSERT_EQUAL_INT(0, e.buffer[0]);
+	TEST_ASSERT_EQUAL_INT(0, e.buffer[EDITOR_BUFFER_SIZE - 1]);
+}
+
+static void test_editor_render_empty_buffer(void) {
+	editor_t e;
+	editor_init(&e);
+	char out[256];
+	size_t n = editor_render(&e, out, sizeof(out));
+	TEST_ASSERT_EQUAL_INT(0, n);
+	TEST_ASSERT_EQUAL_INT(0, out[0]);
+}
+
+static void test_editor_render_abc(void) {
+	editor_t e;
+	editor_init(&e);
+	memcpy(e.buffer, "abc", 3);
+	e.len = 3;
+	char out[256];
+	size_t n = editor_render(&e, out, sizeof(out));
+	TEST_ASSERT_EQUAL_INT(3, n);
+	TEST_ASSERT_EQUAL_STRING("abc", out);
+}
+
+static void test_editor_render_truncates_on_small_buffer(void) {
+	editor_t e;
+	editor_init(&e);
+	memcpy(e.buffer, "abcdef", 6);
+	e.len = 6;
+	char out[4];  /* 3 chars + '\0' */
+	size_t n = editor_render(&e, out, sizeof(out));
+	TEST_ASSERT_EQUAL_INT(3, n);
+	TEST_ASSERT_EQUAL_STRING("abc", out);
+}
+
+static void test_editor_render_zero_size_returns_zero(void) {
+	editor_t e;
+	editor_init(&e);
+	memcpy(e.buffer, "abc", 3);
+	e.len = 3;
+	char out[1] = { 'x' };
+	size_t n = editor_render(&e, out, 0);
+	TEST_ASSERT_EQUAL_INT(0, n);
+	/* out não deve ser tocado */
+	TEST_ASSERT_EQUAL_INT('x', out[0]);
+}
+
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_version_returns_zero);
 	RUN_TEST(test_editor_sets_raw_flags);
@@ -93,4 +145,9 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
 	RUN_TEST(test_editor_should_not_exit_on_other_keys);
 	RUN_TEST(test_enter_and_leave_raw_restores_terminal);
+	RUN_TEST(test_editor_init_zeroes_buffer);
+	RUN_TEST(test_editor_render_empty_buffer);
+	RUN_TEST(test_editor_render_abc);
+	RUN_TEST(test_editor_render_truncates_on_small_buffer);
+	RUN_TEST(test_editor_render_zero_size_returns_zero);
 }
