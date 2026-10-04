@@ -6,8 +6,6 @@
 
 ## To do
 
-- H0.4: As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
-> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
 - H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
 - H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 - H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
@@ -27,3 +25,5 @@
 - H0.3: As dev, I want pty-based integration tests for terminal enter/leave, so that I can catch regressions in raw mode
 > Solves Notice (H1.1)
 - H1.3: As user, I want to see buffer content at my screen, so I can know what I am editing
+- H0.4: As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
+> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
