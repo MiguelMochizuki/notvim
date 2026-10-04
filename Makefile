@@ -30,7 +30,7 @@ test: test_runner
 	./test_runner
 
 test_runner: $(OBJS_LIB) $(TEST_OBJS) $(UNITY_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^
+	$(CC) $(CFLAGS) -o $@ $^ -lutil
 
 clean:
 	rm -f notvim test_runner

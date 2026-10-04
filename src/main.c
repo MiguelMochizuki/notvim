@@ -3,9 +3,11 @@
 #include <unistd.h>
 #include "editor.h"
 
+static void cleanup(void) { editor_leave_raw(STDIN_FILENO); }
+
 int main(void) {
-	editor_enter_raw();
-	atexit(editor_leave_raw);
+	editor_enter_raw(STDIN_FILENO);
+	atexit(cleanup);
 
 	/* Main loop */
 	char c;

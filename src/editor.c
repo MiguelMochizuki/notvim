@@ -18,20 +18,20 @@ void editor_set_raw_flags(struct termios *t) {
 	t->c_cc[VTIME] = 0;
 }
 
-void editor_enter_raw(void) {
+void editor_enter_raw(int fd) {
 	if (raw_active) return;
-	if (tcgetattr(STDIN_FILENO, &saved_termios) == -1) return;
+	if (tcgetattr(fd, &saved_termios) == -1) return;
 
 	struct termios raw = saved_termios;
 	editor_set_raw_flags(&raw);
-	if (tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw) == -1) return;
+	if (tcsetattr(fd, TCSAFLUSH, &raw) == -1) return;
 
 	raw_active = 1;
 }
 
-void editor_leave_raw(void) {
+void editor_leave_raw(int fd) {
 	if (!raw_active) return;
-	tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_termios);
+	tcsetattr(fd, TCSAFLUSH, &saved_termios);
 	raw_active = 0;
 }
 

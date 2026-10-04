@@ -3,6 +3,8 @@
  */
 #include <termios.h>
 #include <string.h>
+#include <pty.h>
+#include <unistd.h>
 #include "unity.h"
 #include "test_editor.h"
 #include "editor.h"
@@ -52,10 +54,43 @@ static void test_editor_should_not_exit_on_other_keys(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_should_exit('q'));
 }
 
+static void test_enter_and_leave_raw_restores_terminal(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+
+	struct termios original;
+	TEST_ASSERT_EQUAL_INT(0, tcgetattr(slave, &original));
+
+	/* Enter raw mode */
+	editor_enter_raw(slave);
+	struct termios raw;
+	TEST_ASSERT_EQUAL_INT(0, tcgetattr(slave, &raw));
+	TEST_ASSERT_EQUAL_INT(0, raw.c_lflag & (ICANON | ECHO | ISIG));
+	TEST_ASSERT_EQUAL_INT(0, raw.c_iflag & (IXON | ICRNL));
+	TEST_ASSERT_EQUAL_INT(0, raw.c_oflag & OPOST);
+	TEST_ASSERT_EQUAL_INT(1, raw.c_cc[VMIN]);
+	TEST_ASSERT_EQUAL_INT(0, raw.c_cc[VTIME]);
+
+	/* Leave raw mode */
+	editor_leave_raw(slave);
+	struct termios restored;
+	TEST_ASSERT_EQUAL_INT(0, tcgetattr(slave, &restored));
+	TEST_ASSERT_EQUAL_INT(original.c_lflag, restored.c_lflag);
+	TEST_ASSERT_EQUAL_INT(original.c_iflag, restored.c_iflag);
+	TEST_ASSERT_EQUAL_INT(original.c_oflag, restored.c_oflag);
+	TEST_ASSERT_EQUAL_INT(original.c_cflag, restored.c_cflag);
+	TEST_ASSERT_EQUAL_INT(original.c_cc[VMIN], restored.c_cc[VMIN]);
+	TEST_ASSERT_EQUAL_INT(original.c_cc[VTIME], restored.c_cc[VTIME]);
+
+	close(master);
+	close(slave);
+}
+
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_version_returns_zero);
 	RUN_TEST(test_editor_sets_raw_flags);
 	RUN_TEST(test_editor_preserves_unrelated_flags);
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
 	RUN_TEST(test_editor_should_not_exit_on_other_keys);
+	RUN_TEST(test_enter_and_leave_raw_restores_terminal);
 }
