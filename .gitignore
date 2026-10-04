@@ -1,4 +1,4 @@
 notvim
+test_runner
 *.o
 *.d
-tests/test_runner
