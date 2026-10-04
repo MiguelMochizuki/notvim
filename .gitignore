@@ -1,0 +1,4 @@
+notvim
+*.o
+*.d
+tests/test_runner
