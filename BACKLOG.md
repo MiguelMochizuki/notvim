@@ -6,7 +6,16 @@
 
 ## To do
 
-(More histories coming...)
+- H0.4: As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
+> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
+- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
+- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
+- H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+- H3.2: As user, I want to type characters in insert mode and see them in the buffer
+- H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
+- H4.1: As user, I want to save with `:w`, so I don't lose my work
+- H4.2: As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
+- H5.1: As user, I want a status line with file name, mode and cursor position
 
 ## Done
 
