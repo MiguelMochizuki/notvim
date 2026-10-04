@@ -2,11 +2,9 @@
 
 ## In progress
 
-- H1.3: As user, I want to see buffer content at my screen, so I can know what I am editing
+- H1.4: As user, I want to run `notvim file.txt` and see first line of the file
 
 ## To do
-
-- H1.4: As user, I want to run `notvim file.txt` and see first line of the file
 
 (More histories coming...)
 
@@ -19,3 +17,4 @@
 - H1.2: As user, I want to leave notvim with `Ctrl+Q`, so I can go back to shell
 - H0.3: As dev, I want pty-based integration tests for terminal enter/leave, so that I can catch regressions in raw mode
 > Solves Notice (H1.1)
+- H1.3: As user, I want to see buffer content at my screen, so I can know what I am editing
