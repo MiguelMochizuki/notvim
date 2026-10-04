@@ -34,3 +34,7 @@ void editor_leave_raw(void) {
 	tcsetattr(STDIN_FILENO, TCSAFLUSH, &saved_termios);
 	raw_active = 0;
 }
+
+int editor_should_exit(char c) {
+    return c == 0x11;  /* Ctrl+Q = DC1 */
+}

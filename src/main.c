@@ -7,10 +7,12 @@ int main(void) {
 	editor_enter_raw();
 	atexit(editor_leave_raw);
 
-	/* Main loop, now allows manual testing for raw mode */
+	/* Main loop */
 	char c;
 	while (read(STDIN_FILENO, &c, 1) == 1) {
-		if (c == 'q') break;
+		if (editor_should_exit(c)) {
+			break;
+		}
 	}
 
 	return 0;
