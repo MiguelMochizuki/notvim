@@ -1,10 +1,18 @@
-/* Main source file */
+/**
+ * @file main.c
+ * @brief Program entry point: terminal setup, initial render and input loop.
+ */
 #include <stdlib.h>
 #include <unistd.h>
 #include "editor.h"
 
+/** @brief atexit() handler that restores the terminal on STDIN_FILENO. */
 static void cleanup(void) { editor_leave_raw(STDIN_FILENO); }
 
+/**
+ * @brief Run the editor until Ctrl+Q is pressed or stdin closes.
+ * @return 0 on normal exit.
+ */
 int main(void) {
 	editor_t e;
 	editor_init(&e);
