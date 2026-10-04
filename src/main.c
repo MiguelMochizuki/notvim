@@ -1,10 +1,17 @@
-/**
- * Main source file
- *
- * Currently not that much, just created this file for validating Makefile
- */
+/* Main source file */
+#include <stdlib.h>
+#include <unistd.h>
 #include "editor.h"
 
 int main(void) {
-	return editor_version();
+	editor_enter_raw();
+	atexit(editor_leave_raw);
+
+	/* Main loop, now allows manual testing for raw mode */
+	char c;
+	while (read(STDIN_FILENO, &c, 1) == 1) {
+		if (c == 'q') break;
+	}
+
+	return 0;
 }
