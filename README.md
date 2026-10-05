@@ -9,10 +9,9 @@ Early development. Currently supports:
 
 - Raw mode input (no echo, no line buffering)
 - Exit with `Ctrl+Q`
-- Single-line buffer with rendering
+- Opening a file given on the command line and showing its lines, up to the terminal height (read-only)
 
-Not yet implemented: opening files, navigation, insertion mode, saving,
-command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
+Not yet implemented: navigation, scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
 ## Build
 
@@ -23,14 +22,18 @@ command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
 ```
 
 Requires a C11 compiler (gcc or clang), make, and libutil (for pty tests).
+Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
+`make test`; `make clean && make SAN=` builds without them.
 
 ## Usage
 
 ```bash
-    ./notvim
+    ./notvim [file]
 ```
 
-Currently the editor starts with an empty buffer and waits for `Ctrl+Q`.
+With a file, its first lines (as many as fit the terminal) are shown; a missing
+file starts an empty buffer, and a file that cannot be read prints an error and
+exits with status 1. The editor then waits for `Ctrl+Q`.
 More will come as histories land.
 
 ## Documentation convention
