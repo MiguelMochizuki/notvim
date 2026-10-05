@@ -2,12 +2,11 @@
 
 ## In progress
 
-- H1.4: As user, I want to run `notvim file.txt` and see first line of the file
+- H1.4: As user, I want to run `notvim file.txt` and see all its lines, up to the terminal height, so I can read the file
+> Notice: merges former H1.4 (first line) and H1.5 (all lines). Requires a multi-line buffer and the terminal size (`TIOCGWINSZ`); changes `editor_t` and `editor_render`. A nonexistent path opens an empty buffer; the file is only created by `:w` (H4.1), as in Vim.
 
 ## To do
 
-- H1.5: As user, I want to see every line of the file, up to the terminal height, so I can read more than the first line
-> Notice: requires a multi-line buffer and the terminal size (`TIOCGWINSZ`); changes `editor_t` and `editor_render`.
 - H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
 - H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 - H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
