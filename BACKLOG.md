@@ -6,6 +6,8 @@
 
 ## To do
 
+- H2.5: As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
+> Notice (H2.5): needs the same mechanism as `rowoff`, for columns (`coloff`, `editor_scroll` with the width, the drawn cursor column relative to it). Until then the cursor stops on the last visible column of a clipped line.
 - H3.2: As user, I want to type characters in insert mode and see them in the buffer
 - H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
 - H4.1: As user, I want to save with `:w`, so I don't lose my work
@@ -52,4 +54,6 @@
 > Design (H2.3, as implemented): `editor_t` gets `rowoff`, the index of the first visible line. `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`; `editor_render` starts at `rowoff`; `editor_draw` puts the cursor on row `cy - rowoff + 1`; `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0. Steps: (1) the editor functions with unit tests, (2) `main` wiring with a pty test on a short terminal.
 > Decisions (H2.3): vertical scrolling only, one line at a time (no half-page jumps or `scrolloff` margin); no horizontal scrolling, so long lines are still cut by the draw buffer (see H1.4). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state. Rows reserved for a status line (H5.1) are not subtracted yet.
 > Known gaps (H2.3): `main` scrolls with the full terminal height, so a status line (H5.1) will need `rows - 1`; the whole screen is still redrawn after every key; a window taller than the file leaves `rowoff` at 0.
-
+- H2.4: As user, I want the editor to draw on the alternate screen and clip lines to the terminal width, so that my shell screen is left untouched and the first lines never scroll out of view
+> Notice (H2.4): found by using `./notvim BACKLOG.md` on a real terminal emulator, which the pty tests could not show. (1) Lines wider than the terminal wrapped onto extra rows (the first 24 lines of `BACKLOG.md` needed 35 rows), the screen overflowed and the terminal scrolled the title away while the cursor row still said 1. `editor_render` and `editor_draw` now take `max_cols` and clip each line, and the drawn cursor column stops at the last column. This solves the long-line gap noted in H1.4. (2) `ESC [ 2 J` does not wipe a terminal emulator's screen, it pushes it into scrollback, leaving blank space (like `Ctrl+L`). `main` now enters the alternate screen (`ESC [ ? 1049 h`) after raw mode and leaves it (`l`) at exit before restoring the tty modes, so the shell screen and scrollback are untouched, as in Vim.
+> Decisions (H2.4): `terminal_enter_alt_screen`/`terminal_leave_alt_screen` are idempotent like raw mode, and a load error is printed before either starts, so it stays on the normal screen. Widths are counted in bytes: tabs and UTF-8 text can still make a line wider than the terminal, to be handled with H2.5 or a tab story. The tests check the exact byte stream on a pty; what a real emulator then shows was checked by hand.
