@@ -28,10 +28,13 @@ void editor_init(editor_t *e) {
 	e->cx = 0;
 	e->rowoff = 0;
 	e->path = NULL;
+	e->msg = NULL;
+	cmdline_clear(&e->cmd);
 }
 
 void editor_free(editor_t *e) {
 	free(e->path);
+	free(e->msg);
 	for (size_t i = 0; i < e->count; i++) free(e->lines[i]);
 	free(e->lines);
 	editor_init(e);
@@ -277,12 +280,14 @@ static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t s
 	}
 	char head[48], *bar = NULL;
 	size_t reserve = 0, head_len = 0, bar_len = 0;
+	int command = e->mode == EDITOR_MODE_COMMAND;
+	size_t tail_len = e->msg || command ? 0 : 3; /* the status line is in reverse video, "ESC[m" ends it; a message or the command line is plain */
 	if (status_row) {
-		head_len = (size_t)snprintf(head, sizeof(head), "\x1b[%zu;1H\x1b[7m", status_row);
+		head_len = (size_t)snprintf(head, sizeof(head), tail_len ? "\x1b[%zu;1H\x1b[7m" : "\x1b[%zu;1H", status_row);
 		bar = malloc(max_cols * 4 + 1);
 		if (bar) {
-			bar_len = editor_status(e, max_cols, bar, max_cols * 4 + 1);
-			if (head_len + bar_len + 3 <= out_size - EDITOR_DRAW_OVERHEAD) reserve = head_len + bar_len + 3; /* "ESC[m" */
+			bar_len = editor_bottom_line(e, max_cols, bar, max_cols * 4 + 1);
+			if (head_len + bar_len + tail_len <= out_size - EDITOR_DRAW_OVERHEAD) reserve = head_len + bar_len + tail_len;
 		}
 	}
 	memcpy(out, HIDE_HOME, HIDE_HOME_LEN);
@@ -307,13 +312,19 @@ static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t s
 		pos += head_len;
 		memcpy(out + pos, bar, bar_len);
 		pos += bar_len;
-		memcpy(out + pos, "\x1b[m", 3);
-		pos += 3;
+		memcpy(out + pos, "\x1b[m", tail_len);
+		pos += tail_len;
 	}
 	free(bar);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
 	if (status_row && row >= max_rows) row = max_rows - 1; /* never on the status line */
 	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
+	if (status_row && command) { /* the cursor is at the end of the typed text on the bottom row */
+		row = status_row - 1;
+		col = 0;
+		for (const char *p = e->cmd.text; *p; p += utf8_cell_len(p)) col++; /* typed characters are valid and printable */
+		col++; /* the ':' */
+	}
 	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
 	pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;%zuH\x1b[?25h", row + 1, col + 1);
 	return pos;
@@ -328,7 +339,7 @@ size_t editor_draw_screen(const editor_t *e, size_t rows, size_t max_cols, char 
 }
 
 const char *editor_mode_label(const editor_t *e) {
-	return e->mode == EDITOR_MODE_INSERT ? "INSERT" : "NORMAL";
+	return e->mode == EDITOR_MODE_INSERT ? "INSERT" : e->mode == EDITOR_MODE_COMMAND ? "COMMAND" : "NORMAL";
 }
 
 /**
@@ -445,6 +456,43 @@ static int type_char(editor_t *e, const char *s, size_t n) {
 	return 1;
 }
 
+/** @brief Append one typed character to the command line (a tab is not typed there); return non-zero if it was added. */
+static int cmd_put(editor_t *e, const char *s, size_t n) {
+	return !(n == 1 && s[0] == '\t') && cmdline_append(&e->cmd, s, n) == 0;
+}
+
+/** @brief Return from command mode to normal mode with an empty command line. */
+static void cmd_leave(editor_t *e) {
+	e->mode = EDITOR_MODE_NORMAL;
+	e->pend_len = 0;
+	cmdline_clear(&e->cmd);
+}
+
+/** @brief Backspace in command mode: delete the last character; on an empty command line cancel it, as Vim does. */
+static int cmd_backspace(editor_t *e) {
+	if (e->cmd.len == 0) cmd_leave(e);
+	else cmdline_backspace(&e->cmd);
+	return 1;
+}
+
+/** @brief Enter in command mode: run the command and go back to normal mode. For now no command has behaviour: every non-empty one is an error. */
+static int cmd_enter(editor_t *e) {
+	cmd_t cmd;
+	cmd_parse(e->cmd.text, &cmd);
+	if (cmd.name[0] || cmd.bang || cmd.arg[0]) {
+		char msg[CMDLINE_MAX + 40];
+		snprintf(msg, sizeof(msg), "E492: Not an editor command: %s", e->cmd.text);
+		editor_set_message(e, msg); /* out of memory: no message */
+	}
+	cmd_leave(e);
+	return 1;
+}
+
+/** @brief A complete character typed in insert mode goes into the text, in command mode into the command line. */
+static int put_char(editor_t *e, const char *s, size_t n) {
+	return e->mode == EDITOR_MODE_COMMAND ? cmd_put(e, s, n) : type_char(e, s, n);
+}
+
 /**
  * @brief Insert-mode key @p c (a byte) of typing: collect the bytes of a UTF-8 character in @c pend and type it when it is complete and valid.
  * @return Non-zero if a character was typed.
@@ -460,16 +508,17 @@ static int type_byte(editor_t *e, unsigned char c) {
 		buf[e->pend_len] = '\0';
 		size_t n = e->pend_len;
 		e->pend_len = 0;
-		return utf8_valid_len(buf) == n ? type_char(e, buf, n) : 0;
+		return utf8_valid_len(buf) == n ? put_char(e, buf, n) : 0;
 	}
 	e->pend_len = 0; /* a half character followed by anything else is dropped */
-	if (c == 0x7f || c == 0x08) return backspace_key(e);
-	if (c == '\r' || c == '\n') return enter_key(e);
+	int cmd = e->mode == EDITOR_MODE_COMMAND;
+	if (c == 0x7f || c == 0x08) return cmd ? cmd_backspace(e) : backspace_key(e);
+	if (c == '\r' || c == '\n') return cmd ? cmd_enter(e) : enter_key(e);
 	if (c >= 0xc2 && c <= 0xf4) { /* lead of a multibyte character; the rest decides if it is valid */
 		e->pend[e->pend_len++] = (char)c;
 		return 0;
 	}
-	if (c == '\t' || (c >= 0x20 && c < 0x7f)) return type_char(e, (const char *)&c, 1);
+	if (c == '\t' || (c >= 0x20 && c < 0x7f)) return put_char(e, (const char *)&c, 1);
 	return 0; /* other control keys, stray continuation and invalid bytes */
 }
 
@@ -481,9 +530,18 @@ static void leave_insert(editor_t *e) {
 	e->wantcol = display_col(e->lines[e->cy], e->cx);
 }
 
-int editor_handle_key(editor_t *e, int key) {
+/** @brief editor_handle_key() without the message: the message was cleared by the caller. */
+static int handle_key(editor_t *e, int key) {
 	editor_move_t dir;
-	if (e->mode == EDITOR_MODE_INSERT && key < 256) return type_byte(e, (unsigned char)key);
+	if (e->mode == EDITOR_MODE_COMMAND && key == KEY_ESC) {
+		cmd_leave(e);
+		return 1;
+	}
+	if (e->mode == EDITOR_MODE_COMMAND && key >= 256) { /* arrows and Delete do nothing on the command line */
+		e->pend_len = 0;
+		return 0;
+	}
+	if (e->mode != EDITOR_MODE_NORMAL && key < 256) return type_byte(e, (unsigned char)key);
 	e->pend_len = 0;
 	switch (key) {
 	case KEY_UP: dir = EDITOR_MOVE_UP; break;
@@ -496,6 +554,10 @@ int editor_handle_key(editor_t *e, int key) {
 	case 'i':
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;
+	case ':':
+		e->mode = EDITOR_MODE_COMMAND;
+		cmdline_clear(&e->cmd);
+		return 1;
 	case KEY_DELETE:
 		return e->mode == EDITOR_MODE_INSERT && delete_key(e);
 	case KEY_ESC:
@@ -506,6 +568,13 @@ int editor_handle_key(editor_t *e, int key) {
 	}
 	editor_move_cursor(e, dir);
 	return 1;
+}
+
+int editor_handle_key(editor_t *e, int key) {
+	int had_message = e->msg != NULL;
+	free(e->msg);
+	e->msg = NULL;
+	return handle_key(e, key) || had_message;
 }
 
 size_t editor_text_rows(size_t rows) {
@@ -535,4 +604,38 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
 	}
 	out[pos] = '\0';
 	return pos;
+}
+
+int editor_set_message(editor_t *e, const char *text) {
+	char *copy = strdup(text);
+	if (!copy) return -1;
+	free(e->msg);
+	e->msg = copy;
+	return 0;
+}
+
+/** @brief Write @p prefix and @p text as one bottom row of exactly @p cols columns (cut by the render rules, padded with spaces) into @p out; return its width in columns before padding and set *len to its bytes. */
+static size_t plain_row(const char *prefix, const char *text, size_t cols, char *out, size_t out_size, size_t *len) {
+	size_t max = out_size - 1, pos = 0;
+	char *line = malloc(strlen(prefix) + strlen(text) + 1);
+	size_t used = 0;
+	if (line) {
+		sprintf(line, "%s%s", prefix, text);
+		used = put_line(line, cols, out, &pos, max);
+		free(line);
+	}
+	size_t width = used;
+	for (; used < cols; used++) put(out, &pos, max, " ", 1);
+	out[pos] = '\0';
+	*len = pos;
+	return width;
+}
+
+size_t editor_bottom_line(const editor_t *e, size_t cols, char *out, size_t out_size) {
+	if (out_size == 0) return 0;
+	size_t len;
+	if (e->mode == EDITOR_MODE_COMMAND) plain_row(":", e->cmd.text, cols, out, out_size, &len);
+	else if (e->msg) plain_row("", e->msg, cols, out, out_size, &len);
+	else return editor_status(e, cols, out, out_size);
+	return len;
 }

@@ -5,6 +5,7 @@
 #include "unity.h"
 #include "test_editor.h"
 #include "test_keys.h"
+#include "test_cmdline.h"
 #include "test_terminal.h"
 #include "test_notvim.h"
 #include "test_stopsig.h"
@@ -26,6 +27,7 @@ int main(void) {
 	UNITY_BEGIN();
 	test_editor_suite();
 	test_keys_suite();
+	test_cmdline_suite();
 	test_stopsig_suite();
 	test_winch_suite();
 	test_utf8_suite();

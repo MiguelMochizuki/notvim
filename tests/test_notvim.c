@@ -1839,6 +1839,93 @@ static void test_notvim_load_error_reports_and_exits_1(void) {
 }
 
 /** @brief Register every test in this file with Unity. */
+/** @brief The screen with @p bottom (padded to the width, plain video) on the last row instead of the status line; the text is the two-line file "ab", "cd". */
+static void screen_bottom(char *buf, size_t size, const char *bottom, int row, int col) {
+	char padded[256];
+	snprintf(padded, sizeof(padded), "%-*s", (int)term_cols, bottom);
+	draw_expected_bottom(buf, size, "ab\r\ncd", (size_t)term_rows - 1, term_cols, padded, term_rows, row, col);
+}
+
+/** @brief ':' opens the command line on the bottom row with the cursor after the text, Enter on "x" shows E492 in plain video, and the next key brings the status line back. */
+static void test_notvim_command_line_error_message_and_next_key(void) {
+	const char *path = tmpdir_write("cmd.txt", "ab\ncd\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], o1[2048], o2[2048], o3[2048], o4[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, ":", o1, sizeof(o1));
+	send_and_read(master, "x", o2, sizeof(o2));
+	send_and_read(master, "\r", o3, sizeof(o3));
+	send_and_read(master, "j", o4, sizeof(o4));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char want[2048];
+	screen_bottom(want, sizeof(want), ":", 24, 2);
+	TEST_ASSERT_EQUAL_STRING(want, o1);
+	screen_bottom(want, sizeof(want), ":x", 24, 3);
+	TEST_ASSERT_EQUAL_STRING(want, o2);
+	screen_bottom(want, sizeof(want), "E492: Not an editor command: x", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(want, o3);
+	TEST_ASSERT_NULL_MESSAGE(strstr(o3, "\x1b[7m"), "a message is not in reverse video");
+	screen(want, sizeof(want), "ab\r\ncd", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(want, o4);
+}
+
+/** @brief Esc cancels a command line, and so does Backspace on an empty one: the status line is back and nothing is run. */
+static void test_notvim_command_line_esc_and_backspace_cancel(void) {
+	const char *path = tmpdir_write("cmd2.txt", "ab\ncd\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], o1[2048], o2[2048], o3[2048], o4[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, ":w", o1, sizeof(o1)); /* two redraws */
+	send_and_read(master, "\x1b", o2, sizeof(o2));
+	send_and_read(master, ":", o3, sizeof(o3));
+	send_and_read(master, "\x7f", o4, sizeof(o4));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char want[2048], one[2048];
+	screen_bottom(want, sizeof(want), ":", 24, 2);
+	screen_bottom(one, sizeof(one), ":w", 24, 3);
+	strcat(want, one);
+	TEST_ASSERT_EQUAL_STRING(want, o1);
+	screen(want, sizeof(want), "ab\r\ncd", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(want, o2);
+	screen_bottom(want, sizeof(want), ":", 24, 2);
+	TEST_ASSERT_EQUAL_STRING(want, o3);
+	screen(want, sizeof(want), "ab\r\ncd", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(want, o4);
+}
+
+/** @brief A resize in command mode keeps the command line, drawn for the new size with the cursor at the end of the text on the new last row. */
+static void test_notvim_command_line_survives_a_resize(void) {
+	const char *path = tmpdir_write("cmd3.txt", "ab\ncd\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], o1[2048], o2[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, ":wq", o1, sizeof(o1));
+	set_size(master, 10, 30);
+	read_output(master, o2, sizeof(o2));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char want[2048];
+	screen_bottom(want, sizeof(want), ":wq", 10, 4);
+	TEST_ASSERT_EQUAL_STRING(want, o2);
+}
+
 void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_binary_enters_raw_and_quits_on_ctrl_q);
 	RUN_TEST(test_notvim_shows_file_lines);
@@ -1913,4 +2000,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_resize_draw_buffer_holds_the_status_line_of_four_byte_text);
 	RUN_TEST(test_notvim_status_line_appears_and_disappears_with_the_height);
 	RUN_TEST(test_notvim_grow_while_scrolled_keeps_the_window_and_redraws_the_old_status_row);
+	RUN_TEST(test_notvim_command_line_error_message_and_next_key);
+	RUN_TEST(test_notvim_command_line_esc_and_backspace_cancel);
+	RUN_TEST(test_notvim_command_line_survives_a_resize);
 }

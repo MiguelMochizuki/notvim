@@ -6,11 +6,13 @@
 #define EDITOR_H
 
 #include <stddef.h>
+#include "cmdline.h"
 
 /** Modes of the editor. */
 typedef enum {
 	EDITOR_MODE_NORMAL, /**< Normal mode: keys are commands; the cursor is always on a character. */
-	EDITOR_MODE_INSERT  /**< Insert mode: the cursor may also sit after the last character of the line. */
+	EDITOR_MODE_INSERT, /**< Insert mode: the cursor may also sit after the last character of the line. */
+	EDITOR_MODE_COMMAND /**< Command-line mode: ':' was typed in normal mode; the bottom row shows ':' and @c cmd and the cursor does not move in the text. */
 } editor_mode_t;
 
 /** Editor state: the text as a growable array of lines. */
@@ -30,6 +32,8 @@ typedef struct {
 	                         length of the line (the cursor is after the last character); in normal mode it never does. */
 	int modified; /**< Non-zero once the text has been changed (typing); 0 after init, free and load. The status line shows
 	                   "[+]" while it is set. */
+	cmdline_t cmd; /**< The command line being typed in @ref EDITOR_MODE_COMMAND; emptied when that mode starts and ends. */
+	char *msg;     /**< Owned message, or NULL: shown on the bottom row instead of the status line until the next key (see editor_set_message()). */
 	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode that is still incomplete; see @ref pend_len. */
 	size_t pend_len; /**< Number of bytes in @ref pend; 0 when no character is half typed. Reset by any key that is not a
 	                      continuation byte, and by leaving insert mode. */
@@ -182,6 +186,15 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
  * at the end of the line if @c wantcol is at or past the end of it (an empty line: 0).
  *
+ * In normal mode ':' opens the command line (@ref EDITOR_MODE_COMMAND; in insert mode ':' is typed as a colon). In
+ * command mode a printable ASCII byte or a whole UTF-8 character is appended to @c cmd (the bytes of a character
+ * arrive as consecutive keys, as in insert mode; at CMDLINE_MAX bytes more are dropped); Backspace deletes the last
+ * character and on an EMPTY command line cancels, as Vim does; KEY_ESC cancels; Enter runs the command and returns to
+ * normal mode. Cancel and run empty the command line and leave the cursor where it was. Every other key is ignored.
+ * Running: an empty command (only spaces and colons) does nothing; any other, known or not, sets the message
+ * "E492: Not an editor command: <text>" for now (:w, :q, :wq and :x have no behaviour yet). Every call first clears the
+ * message, and then returns non-zero if there was one, so the screen is redrawn without it.
+ *
  * @param e   Editor to modify; must not be NULL.
  * @param key A byte (0-255) or a KEY_ constant of keys.h.
  * @return Non-zero if the key was a command of the current mode, so the screen must be redrawn (even if the cursor
@@ -264,7 +277,7 @@ size_t editor_text_rows(size_t rows);
 /**
  * @brief Label of the mode of @p e, as the status line shows it.
  * @param e Editor to describe; must not be NULL.
- * @return "NORMAL" or "INSERT"; a string literal, never NULL.
+ * @return "NORMAL", "INSERT" or "COMMAND"; a string literal, never NULL.
  */
 const char *editor_mode_label(const editor_t *e);
 
@@ -368,5 +381,34 @@ size_t editor_draw_text(const editor_t *e, size_t max_rows, size_t max_cols, cha
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is smaller than EDITOR_DRAW_OVERHEAD.
  */
 size_t editor_draw_screen(const editor_t *e, size_t rows, size_t max_cols, char *out, size_t out_size);
+
+/**
+ * @brief Show @p text on the bottom row instead of the status line, until the next key press.
+ *
+ * The message mechanism: @p e keeps a copy in @c msg (a previous message is dropped). It is drawn like the status line
+ * is, as one row of the full width cut by columns and padded with spaces, but in plain video, and through the same
+ * render rules as buffer text (marks for control bytes, '?' for invalid UTF-8), so bytes of a file or a path can be
+ * passed safely. The next call of editor_handle_key(), whatever the key, clears it (and asks for a redraw). A resize
+ * does not clear it. A terminal of one row has no bottom row: the message is kept but not drawn.
+ *
+ * @param e    Editor to modify; must not be NULL.
+ * @param text NUL-terminated message.
+ * @return 0 on success, -1 on failure (errno is ENOMEM); the old message is kept on failure.
+ */
+int editor_set_message(editor_t *e, const char *text);
+
+/**
+ * @brief Write the bottom row of @p e, as drawn, into @p out as a NUL-terminated string of exactly @p cols columns.
+ *
+ * In command mode it is ':' and the command text; else the message if there is one; else editor_status(). It is cut to
+ * @p cols columns by the render rules (never inside a character or mark) and padded with spaces. Pure text.
+ *
+ * @param e        Editor to describe; must not be NULL.
+ * @param cols     Width of the terminal in columns.
+ * @param out      Destination buffer; @p cols * 4 + 1 bytes always hold the whole row.
+ * @param out_size Size of @p out in bytes.
+ * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
+ */
+size_t editor_bottom_line(const editor_t *e, size_t cols, char *out, size_t out_size);
 
 #endif

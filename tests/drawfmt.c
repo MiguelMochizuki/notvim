@@ -43,6 +43,16 @@ void draw_expected_status(char *buf, size_t size, const char *text, size_t max_r
 	snprintf(buf + pos, size - pos, "%s", tail);
 }
 
+void draw_expected_bottom(char *buf, size_t size, const char *text, size_t max_rows, size_t max_cols, const char *bottom,
+                          size_t bottom_row, int row, int col) {
+	draw_expected(buf, size, text, max_rows, max_cols, row, col);
+	char tail[64];
+	size_t tail_len = (size_t)snprintf(tail, sizeof(tail), "\x1b[%d;%dH\x1b[?25h", row, col);
+	size_t pos = strlen(buf) - tail_len; /* the bottom row goes in front of the cursor tail */
+	pos += (size_t)snprintf(buf + pos, size - pos, "\x1b[%zu;1H%s", bottom_row, bottom);
+	snprintf(buf + pos, size - pos, "%s", tail);
+}
+
 void status_expected(char *buf, size_t size, const char *name, int dos, int modified, const char *mode, size_t line, size_t col, size_t cols) {
 	char left[512], right[64];
 	snprintf(left, sizeof(left), "%s%s%s %s", name ? name : "[No Name]", dos ? " [dos]" : "", modified ? " [+]" : "", mode);

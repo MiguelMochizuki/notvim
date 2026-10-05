@@ -43,6 +43,19 @@ void draw_expected_status(char *buf, size_t size, const char *text, size_t max_r
                           size_t status_row, int row, int col);
 
 /**
+ * @brief Like draw_expected_status(), but for a bottom row in plain video: the command line or a message.
+ *
+ * After the text rows and the erase of the unused ones, "ESC[<bottom_row>;1H" and @p bottom (no reverse video, no ESC[K
+ * after it: it is padded to the full width), then the cursor position and show cursor.
+ *
+ * @param bottom     The bottom row as drawn, already padded to the width.
+ * @param bottom_row Row of the bottom line, 1-based: the terminal height.
+ * @note The other parameters are those of draw_expected_status().
+ */
+void draw_expected_bottom(char *buf, size_t size, const char *text, size_t max_rows, size_t max_cols, const char *bottom,
+                          size_t bottom_row, int row, int col);
+
+/**
  * @brief Build the status line of a plain ASCII file name the way editor_status() must, for the pty tests.
  *
  * "<name> [dos] <mode>" ("[dos] " only if @p dos), padding, "<line>,<col>" at the right, cut as editor_status() documents;

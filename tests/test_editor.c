@@ -3613,6 +3613,291 @@ static void test_editor_draw_screen_worst_case_tail_is_complete(void) {
 }
 
 /** @brief Register every test in this file with Unity. */
+/* ---- the command line and the message (H4.1, first half) ---- */
+
+/** @brief Send each byte of @p keys as a key, unchanged (no letter stands for a special key here; bytes above 127 are kept). */
+static void type_cmd(const char *keys) {
+	for (; *keys; keys++) editor_handle_key(&e, (unsigned char)*keys);
+}
+
+/** @brief Assert that the bottom row of the shared editor for @p cols columns is @p expected (padded to the full width). */
+static void assert_bottom(size_t cols, const char *expected) {
+	char out[1024];
+	size_t n = editor_bottom_line(&e, cols, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+}
+
+/** @brief ':' in normal mode opens the command line and asks for a redraw; the label says COMMAND; Esc cancels and the cursor stays. */
+static void test_editor_colon_opens_the_command_line_and_esc_cancels(void) {
+	editor_init(&e);
+	append("abc");
+	press("l");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, ':'));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+	TEST_ASSERT_EQUAL_STRING("COMMAND", editor_mode_label(&e));
+	type_cmd("wq");
+	TEST_ASSERT_EQUAL_STRING("wq", e.cmd.text);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, KEY_ESC));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+	TEST_ASSERT_NULL(e.msg);
+	assert_cursor(0, 1);
+	editor_handle_key(&e, ':'); /* a new command line starts empty */
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+}
+
+/** @brief Backspace deletes the last character, a whole UTF-8 one; on an empty command line it cancels, as Vim does. */
+static void test_editor_command_backspace_deletes_and_cancels_when_empty(void) {
+	editor_init(&e);
+	type_cmd(":a\xc3\xa9");
+	TEST_ASSERT_EQUAL_STRING("a\xc3\xa9", e.cmd.text);
+	type_cmd("\x7f");
+	TEST_ASSERT_EQUAL_STRING("a", e.cmd.text);
+	type_cmd("\x08"); /* Ctrl+H is Backspace too */
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0x7f));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	TEST_ASSERT_NULL(e.msg);
+}
+
+/** @brief A UTF-8 character is typed once all its bytes are in; a half one followed by something else is dropped. */
+static void test_editor_command_utf8_characters_are_whole(void) {
+	editor_init(&e);
+	editor_handle_key(&e, ':');
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0xe2));
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x82));
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0xac));
+	TEST_ASSERT_EQUAL_STRING("\xe2\x82\xac", e.cmd.text);
+	type_cmd("\xc3"); /* half, then a letter: dropped */
+	type_cmd("b");
+	TEST_ASSERT_EQUAL_STRING("\xe2\x82\xac" "b", e.cmd.text);
+	type_cmd("\x80"); /* a stray continuation byte */
+	TEST_ASSERT_EQUAL_STRING("\xe2\x82\xac" "b", e.cmd.text);
+}
+
+/** @brief Arrows, Delete, Tab and other control keys do nothing in command mode, and the cursor of the text does not move. */
+static void test_editor_command_ignores_other_keys(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	editor_handle_key(&e, ':');
+	type_cmd("a");
+	press("UDLR");
+	editor_handle_key(&e, KEY_DELETE);
+	type_cmd("\t\x01");
+	TEST_ASSERT_EQUAL_STRING("a", e.cmd.text);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, KEY_UP));
+	assert_cursor(0, 0);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+}
+
+/** @brief The command line holds CMDLINE_MAX bytes; more keys are dropped and the mode stays. */
+static void test_editor_command_line_is_bounded(void) {
+	editor_init(&e);
+	editor_handle_key(&e, ':');
+	for (int i = 0; i < CMDLINE_MAX + 20; i++) editor_handle_key(&e, 'a');
+	TEST_ASSERT_EQUAL_UINT(CMDLINE_MAX, e.cmd.len);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+}
+
+/** @brief Enter on an empty command line (or only spaces and colons) returns to normal mode and shows nothing. */
+static void test_editor_enter_on_an_empty_command_does_nothing(void) {
+	editor_init(&e);
+	type_cmd(":\r");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	TEST_ASSERT_NULL(e.msg);
+	type_cmd(": :  \n");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	TEST_ASSERT_NULL(e.msg);
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+}
+
+/** @brief Every non-empty command, known or not, shows E492 with the text as typed, and the mode goes back to normal. */
+static void test_editor_every_command_shows_e492_for_now(void) {
+	const char *cmds[] = { "x", "w", "w!", "q", "q!", "wq", "w name", "zz" };
+	for (size_t i = 0; i < sizeof(cmds) / sizeof(*cmds); i++) {
+		editor_init(&e);
+		append("t");
+		editor_handle_key(&e, ':');
+		type_cmd(cmds[i]);
+		TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, '\r'));
+		char want[CMDLINE_MAX + 64];
+		snprintf(want, sizeof(want), "E492: Not an editor command: %s", cmds[i]);
+		TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+		TEST_ASSERT_NOT_NULL(e.msg);
+		TEST_ASSERT_EQUAL_STRING(want, e.msg);
+		TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+		TEST_ASSERT_EQUAL_INT(0, e.modified);
+		editor_free(&e);
+	}
+}
+
+/** @brief The next key, whatever it is, clears the message and asks for a redraw, even a key that does nothing. */
+static void test_editor_the_next_key_clears_the_message(void) {
+	editor_init(&e);
+	type_cmd(":zz\r");
+	TEST_ASSERT_NOT_NULL(e.msg);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'z')); /* unknown in normal mode: ignored, but the message goes */
+	TEST_ASSERT_NULL(e.msg);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 'z')); /* no message now: nothing to redraw */
+	type_cmd(":zz\r");
+	editor_handle_key(&e, ':'); /* the key that clears it can start a new command line */
+	TEST_ASSERT_NULL(e.msg);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+	editor_handle_key(&e, KEY_ESC);
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "m"));
+	editor_handle_key(&e, KEY_LEFT);
+	TEST_ASSERT_NULL(e.msg);
+}
+
+/** @brief A new message replaces the old one; free drops message and command line. */
+static void test_editor_set_message_replaces_and_free_drops(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "one"));
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "two"));
+	TEST_ASSERT_EQUAL_STRING("two", e.msg);
+	type_cmd(":ab");
+	editor_free(&e);
+	TEST_ASSERT_NULL(e.msg);
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+}
+
+/** @brief ':' in insert mode types a colon: there is no command line there. */
+static void test_editor_colon_in_insert_mode_is_a_colon(void) {
+	editor_init(&e);
+	append("ab");
+	press("i");
+	type_cmd(":");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	assert_line(&e, 0, ":ab");
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+}
+
+/** @brief The bottom row in command mode is ':' and the text, padded to the width; cut at the width. */
+static void test_editor_bottom_line_in_command_mode(void) {
+	editor_init(&e);
+	type_cmd(":wq");
+	assert_bottom(10, ":wq       ");
+	assert_bottom(3, ":wq");
+	assert_bottom(2, ":w");
+	assert_bottom(0, "");
+	type_cmd("\xc3\xa9");
+	assert_bottom(6, ":wq\xc3\xa9  ");
+}
+
+/** @brief The bottom row with a message: the message, cut and padded, marks as marks, in place of the status line. */
+static void test_editor_bottom_line_with_a_message(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "a\x01" "b\xff" "c"));
+	assert_bottom(8, "a^Ab?c  ");
+	assert_bottom(5, "a^Ab?");
+	assert_bottom(4, "a^Ab");
+	assert_bottom(3, "a^A");
+	assert_bottom(2, "a "); /* the mark needs 2 columns and 1 is left */
+	assert_bottom(1, "a");
+}
+
+/** @brief Without command line or message the bottom row is the status line. */
+static void test_editor_bottom_line_is_the_status_by_default(void) {
+	editor_init(&e);
+	char want[64], got[64];
+	editor_status(&e, 20, want, sizeof(want));
+	editor_bottom_line(&e, 20, got, sizeof(got));
+	TEST_ASSERT_EQUAL_STRING(want, got);
+	TEST_ASSERT_EQUAL_UINT(0, editor_bottom_line(&e, 20, got, 0));
+}
+
+/** @brief Command mode draws ':' and the text in plain video on the last row, and the cursor sits at the end of the text there. */
+static void test_editor_draw_screen_in_command_mode(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	type_cmd(":wq");
+	assert_screen_literal(4, 20, "\x1b[?25l\x1b[H" "ab\x1b[K\r\n" "cd\x1b[K" "\x1b[3;1H\x1b[J"
+	                      "\x1b[4;1H" ":wq" "                 " "\x1b[4;4H\x1b[?25h");
+}
+
+/** @brief The status line is back after Esc; a text cursor that was moved is where it was. */
+static void test_editor_draw_screen_after_cancel_has_the_status_again(void) {
+	editor_init(&e);
+	append("ab");
+	type_cmd(":wq");
+	editor_handle_key(&e, KEY_ESC);
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[2;1H\x1b[J"
+	                      "\x1b[3;1H\x1b[7m" "[No Name] NORMAL" " " "1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief A command line wider than the terminal is cut at the width and the cursor stays on the last column. */
+static void test_editor_draw_screen_command_wider_than_the_terminal(void) {
+	editor_init(&e);
+	type_cmd(":abcdefg");
+	assert_screen_literal(2, 5, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J" "\x1b[2;1H" ":abcd" "\x1b[2;5H\x1b[?25h");
+	editor_init(&e);
+	type_cmd(":abcd"); /* exactly the width: no erase, the cursor on the last column */
+	assert_screen_literal(2, 5, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J" "\x1b[2;1H" ":abcd" "\x1b[2;5H\x1b[?25h");
+}
+
+/** @brief The row of a message is plain video, full width, drawn instead of the status line, and the cursor stays in the text. */
+static void test_editor_draw_screen_with_a_message(void) {
+	editor_init(&e);
+	append("ab");
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "E492: Not an editor command: x"));
+	assert_screen_literal(3, 40, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[2;1H\x1b[J"
+	                      "\x1b[3;1H" "E492: Not an editor command: x" "          " "\x1b[1;1H\x1b[?25h");
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[2;1H\x1b[J"
+	                      "\x1b[3;1H" "E492: Not an editor " "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief A message goes through the render rules: marks are marks, never cut, UTF-8 counts by columns, and no raw byte of it reaches the terminal. */
+static void test_editor_draw_screen_message_marks_and_utf8(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_set_message(&e, "\x1b[2J\xc3\xa9\xc3\xa9"));
+	assert_screen_literal(2, 6, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J"
+	                      "\x1b[2;1H" "^[[2J\xc3\xa9" "\x1b[1;1H\x1b[?25h");
+	assert_screen_literal(2, 7, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J"
+	                      "\x1b[2;1H" "^[[2J\xc3\xa9\xc3\xa9" "\x1b[1;1H\x1b[?25h");
+	assert_screen_literal(2, 3, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J"
+	                      "\x1b[2;1H" "^[[" "\x1b[1;1H\x1b[?25h");
+	assert_screen_literal(2, 1, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J"
+	                      "\x1b[2;1H" " " "\x1b[1;1H\x1b[?25h"); /* the mark needs 2 columns */
+}
+
+/** @brief A terminal of one row has no bottom row: command mode and a message draw as the text only, with the cursor in the text. */
+static void test_editor_draw_screen_one_row_has_no_bottom_row(void) {
+	editor_init(&e);
+	append("ab");
+	type_cmd(":x");
+	char out[512], want[512];
+	editor_draw_screen(&e, 1, 20, out, sizeof(out));
+	editor_draw_text(&e, 1, 20, want, sizeof(want));
+	TEST_ASSERT_EQUAL_STRING(want, out);
+}
+
+/** @brief A resize in command mode: the same state drawn for another size keeps the command line and its cursor. */
+static void test_editor_resize_in_command_mode_keeps_the_command_line(void) {
+	editor_init(&e);
+	append("ab");
+	type_cmd(":wq");
+	assert_screen_literal(3, 10, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[2;1H\x1b[J" "\x1b[3;1H" ":wq       " "\x1b[3;4H\x1b[?25h");
+	assert_screen_literal(2, 3, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[2;1H" ":wq" "\x1b[2;3H\x1b[?25h");
+}
+
+/** @brief Bytes of the command line are bounded by the draw buffer rule: a screen of the documented size holds a full-width command row. */
+static void test_editor_draw_screen_command_row_fits_the_documented_buffer(void) {
+	editor_init(&e);
+	type_cmd(":\xe2\x82\xac\xe2\x82\xac\xe2\x82\xac\xe2\x82\xac");
+	size_t rows = 3, cols = 4;
+	size_t size = rows * (cols * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD;
+	char out[1024];
+	TEST_ASSERT_TRUE(size <= sizeof(out));
+	size_t n = editor_draw_screen(&e, rows, cols, out, size);
+	TEST_ASSERT_NOT_NULL(strstr(out, "\x1b[3;1H:\xe2\x82\xac\xe2\x82\xac\xe2\x82\xac\x1b[3;4H\x1b[?25h"));
+	TEST_ASSERT_EQUAL_UINT(strlen(out), n);
+}
+
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
 	RUN_TEST(test_editor_should_not_exit_on_other_keys);
@@ -3897,4 +4182,25 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_status_shows_no_dos_for_other_files);
 	RUN_TEST(test_editor_status_dos_with_a_utf8_name_and_truncation);
 	RUN_TEST(test_editor_status_column_on_a_mark);
+	RUN_TEST(test_editor_colon_opens_the_command_line_and_esc_cancels);
+	RUN_TEST(test_editor_command_backspace_deletes_and_cancels_when_empty);
+	RUN_TEST(test_editor_command_utf8_characters_are_whole);
+	RUN_TEST(test_editor_command_ignores_other_keys);
+	RUN_TEST(test_editor_command_line_is_bounded);
+	RUN_TEST(test_editor_enter_on_an_empty_command_does_nothing);
+	RUN_TEST(test_editor_every_command_shows_e492_for_now);
+	RUN_TEST(test_editor_the_next_key_clears_the_message);
+	RUN_TEST(test_editor_set_message_replaces_and_free_drops);
+	RUN_TEST(test_editor_colon_in_insert_mode_is_a_colon);
+	RUN_TEST(test_editor_bottom_line_in_command_mode);
+	RUN_TEST(test_editor_bottom_line_with_a_message);
+	RUN_TEST(test_editor_bottom_line_is_the_status_by_default);
+	RUN_TEST(test_editor_draw_screen_in_command_mode);
+	RUN_TEST(test_editor_draw_screen_after_cancel_has_the_status_again);
+	RUN_TEST(test_editor_draw_screen_command_wider_than_the_terminal);
+	RUN_TEST(test_editor_draw_screen_with_a_message);
+	RUN_TEST(test_editor_draw_screen_message_marks_and_utf8);
+	RUN_TEST(test_editor_draw_screen_one_row_has_no_bottom_row);
+	RUN_TEST(test_editor_resize_in_command_mode_keeps_the_command_line);
+	RUN_TEST(test_editor_draw_screen_command_row_fits_the_documented_buffer);
 }
