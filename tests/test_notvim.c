@@ -82,6 +82,16 @@ static void screen(char *buf, size_t size, const char *text, int row, int col) {
 	snprintf(buf, size, "\x1b[H\x1b[2J%s\x1b[%d;%dH", text, row, col);
 }
 
+/** Sequences notvim writes when it enters and leaves the alternate screen. */
+#define ALT_ENTER "\x1b[?1049h"
+#define ALT_LEAVE "\x1b[?1049l"
+
+/** @brief Like screen(), preceded by the switch to the alternate screen: what notvim writes first. */
+static void first_screen(char *buf, size_t size, const char *text, int row, int col) {
+	size_t n = (size_t)snprintf(buf, size, "%s", ALT_ENTER);
+	screen(buf + n, size - n, text, row, col);
+}
+
 /** @brief Send @p keys to the child, then read what it draws in answer; return the length. */
 static size_t send_and_read(int master, const char *keys, char *out, size_t size) {
 	if (write(master, keys, strlen(keys)) < 0) {
@@ -116,7 +126,7 @@ static void test_notvim_shows_file_lines(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	screen(expected, sizeof(expected), "line1\r\nline2\r\nline3", 1, 1);
+	first_screen(expected, sizeof(expected), "line1\r\nline2\r\nline3", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -134,7 +144,7 @@ static void test_notvim_shows_only_the_rows_that_fit(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	screen(expected, sizeof(expected), "a\r\nb", 1, 1);
+	first_screen(expected, sizeof(expected), "a\r\nb", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -164,7 +174,7 @@ static void test_notvim_shows_a_full_screen_of_long_lines(void) {
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	screen(expected, sizeof(expected), text, 1, 1);
+	first_screen(expected, sizeof(expected), text, 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -194,7 +204,7 @@ static void test_notvim_clips_long_lines_to_the_terminal_width(void) {
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	screen(expected, sizeof(expected), text, 1, 1);
+	first_screen(expected, sizeof(expected), text, 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -212,7 +222,7 @@ static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	screen(expected, sizeof(expected), "", 1, 1);
+	first_screen(expected, sizeof(expected), "", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 	struct stat st;
 	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
@@ -237,7 +247,7 @@ static void test_notvim_arrow_keys_move_the_cursor_and_redraw(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	first_screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, first);
 	screen(expected, sizeof(expected), "abc\r\ndef", 2, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, down);
@@ -330,7 +340,7 @@ static void test_notvim_scrolls_when_the_cursor_leaves_the_screen(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	screen(expected, sizeof(expected), "a\r\nb\r\nc", 1, 1);
+	first_screen(expected, sizeof(expected), "a\r\nb\r\nc", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, first);
 	screen(expected, sizeof(expected), "a\r\nb\r\nc", 2, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, d1);
@@ -365,6 +375,26 @@ static void test_notvim_ordinary_key_does_not_redraw(void) {
 	TEST_ASSERT_EQUAL_UINT(0, n);
 }
 
+/** @brief Quitting switches back from the alternate screen and writes nothing else. */
+static void test_notvim_leaves_the_alternate_screen_on_exit(void) {
+	const char *path = tmpdir_write("leave.txt", "abc\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], last[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	char ctrl_q = 0x11;
+	ssize_t sent = write(master, &ctrl_q, 1);
+	read_output(master, last, sizeof(last));
+	int status = wait_exit(pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(1, (int)sent);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_STRING(ALT_LEAVE, last);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -378,6 +408,7 @@ static void test_notvim_load_error_reports_and_exits_1(void) {
 	TEST_ASSERT_EQUAL_INT(1, status);
 	TEST_ASSERT_EQUAL_INT(0, strncmp(out, "notvim: ", 8));
 	TEST_ASSERT_NOT_NULL(strstr(out, path));
+	TEST_ASSERT_NULL_MESSAGE(strstr(out, "\x1b[?1049"), "the error must stay on the normal screen");
 }
 
 /** @brief Register every test in this file with Unity. */
@@ -394,5 +425,6 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
+	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
 }

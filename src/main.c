@@ -11,8 +11,11 @@
 #include "keys.h"
 #include "terminal.h"
 
-/** @brief atexit() handler that restores the terminal on STDIN_FILENO. */
-static void cleanup(void) { terminal_leave_raw(STDIN_FILENO); }
+/** @brief atexit() handler: switch back from the alternate screen, then restore the tty modes. */
+static void cleanup(void) {
+	terminal_leave_alt_screen(STDOUT_FILENO);
+	terminal_leave_raw(STDIN_FILENO);
+}
 
 /**
  * @brief Translate an arrow key, or h/j/k/l as in Vim, into a cursor move.
@@ -43,8 +46,8 @@ static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size
 /**
  * @brief Run the editor until Ctrl+Q is pressed or stdin closes.
  *
- * Usage: notvim [file]. The file is loaded before raw mode starts, so a load
- * error is printed on a normal terminal. The arrow keys and h/j/k/l move the
+ * Usage: notvim [file]. The file is loaded before raw mode and the alternate
+ * screen start, so a load error is printed on the normal terminal. The arrow keys and h/j/k/l move the
  * cursor and the screen is redrawn after each move.
  *
  * @return 0 on normal exit, 1 if the file can't be loaded.
@@ -59,6 +62,7 @@ int main(int argc, char **argv) {
 	}
 
 	terminal_enter_raw(STDIN_FILENO);
+	terminal_enter_alt_screen(STDOUT_FILENO);
 	atexit(cleanup);
 
 	int rows, cols;
