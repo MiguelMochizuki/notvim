@@ -15,9 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
-  - Reproduced: a line `a\0b` is drawn as `a`. With `:w` (H4.1) the rest of the line would be lost.
-  - Refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
+- **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
+  - Reproduced: a file containing `ESC [ 2 J` clears the screen when it is displayed.
+  - The marks are wider than the byte they replace, so the cursor and the clipping must count columns (shared with H6.4 and H6.8).
 
 ## To do
 
@@ -26,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
-  - Reproduced: a file containing `ESC [ 2 J` clears the screen when it is displayed.
-  - The marks are wider than the byte they replace, so the cursor and the clipping must count columns (shared with H6.4 and H6.8).
 - **H6.4** As user, I want tabs shown as spaces up to the next tab stop (8 columns), so that lines with tabs do not wrap and scroll the screen
   - Reproduced: 24 lines of 20 tabs are 21 bytes each but 161 columns, and need 72 rows on a 24-row terminal.
   - Introduces the difference between a byte index and a display column, for the cursor and for clipping.
@@ -53,7 +50,8 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
 ### H0 Development foundations
 
 - **H0.11** As dev, I want the remaining test gaps closed where practical
-  - The out-of-memory path of `editor_load_file` and `editor_append_line`, and the cleanup after a read error halfway through a file, are not tested.
+  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
+  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
   - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
 
 ### H2 Navigation
@@ -189,3 +187,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - `main` waits on stdin with `poll()`: without limit when idle, `KEY_ESC_TIMEOUT_MS` (50 ms) while a sequence is pending. The raw-mode flags and their tests are unchanged (`VMIN`/`VTIME` was the alternative).
   - `KEY_ESC` is reported but nothing uses it yet; H3.1 will leave insert mode with it.
   - Known gap: a terminal that sends the bytes of an arrow key more than 50 ms apart (a very slow link) would be read as `Esc` followed by `[` and a letter.
+- **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
+  - Reproduced: a line `a\0b` was drawn as `a`. With `:w` (H4.1) the rest of the line would have been lost.
+  - `editor_load_file` fails with `errno` `EILSEQ` when a line contains a NUL byte, and leaves the editor empty, including any lines already loaded.
+  - `main` prints `notvim: <path>: binary file (contains NUL bytes)` and exits 1 before raw mode, so it shows on the normal screen.
+  - Decision: refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
+  - Side effects: the "NUL after good lines" test exercises the cleanup of a half-loaded editor (part of H0.11). `tmpdir_write_bytes` was added for the tests, and it now refuses names with a `/`, after `../x` wrote outside the temporary directory.
