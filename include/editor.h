@@ -109,16 +109,19 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
- * turns off output processing. A blank line counts as a row. Output is
+ * turns off output processing. A blank line counts as a row. A control byte
+ * (below 0x20 except tab, or 0x7f) is drawn as a two-column mark such as ^[
+ * or ^?, so that a file can never send commands to the terminal; clipping
+ * never shows half of a mark. Output is
  * truncated to fit @p out_size, leaving room for the NUL.
  *
  * @param e        Editor to render; must not be NULL.
  * @param max_rows Maximum number of lines to render, usually the terminal
  *                 height; 0 renders nothing. The first line rendered is
  *                 line @c rowoff; a @c rowoff past the last line renders nothing.
- * @param max_cols Maximum number of bytes of each line to render, usually the
- *                 terminal width. Longer lines are clipped on the right, so
- *                 no line wraps and scrolls the terminal; there is no
+ * @param max_cols Maximum number of columns of each line to render, usually
+ *                 the terminal width. Longer lines are clipped on the right,
+ *                 so no line wraps and scrolls the terminal; there is no
  *                 horizontal scrolling yet.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes.
@@ -149,7 +152,8 @@ int editor_load_file(editor_t *e, const char *path);
  *
  * The output clears the screen and moves home, then holds editor_render() of
  * @p max_rows lines from @c rowoff, then moves the cursor to row
- * cy-rowoff+1 (row 1 if the cursor is above the window), column cx+1. It
+ * cy-rowoff+1 (row 1 if the cursor is above the window), at the display
+ * column of cx plus 1 (marks are two columns wide). It
  * does not scroll: call editor_scroll() first. The cursor sequence is always complete: if @p out_size is too small
  * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
  * written. A cursor below the window is reported at its real row and the

@@ -208,6 +208,27 @@ static void test_notvim_clips_long_lines_to_the_terminal_width(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
+/** @brief A file with an escape sequence is shown as text and cannot clear the screen. */
+static void test_notvim_shows_escape_sequences_in_a_file_as_text(void) {
+	const char *path = tmpdir_write("danger.txt", "a\x1b[2Jb\nline2\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[256], expected[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), "a^[[2Jb\r\nline2", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+	/* the only clear-screen sequence is the one notvim itself sends */
+	const char *first_clear = strstr(out, "\x1b[2J");
+	TEST_ASSERT_NOT_NULL(first_clear);
+	TEST_ASSERT_NULL(strstr(first_clear + 1, "\x1b[2J"));
+}
+
 /** @brief A missing file starts an empty editor, draws an empty screen and is not created. */
 static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	const char *path = tmpdir_path("new.txt");
@@ -490,6 +511,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_arrow_split_across_writes_still_works);
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
+	RUN_TEST(test_notvim_shows_escape_sequences_in_a_file_as_text);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
 	RUN_TEST(test_notvim_refuses_a_binary_file);

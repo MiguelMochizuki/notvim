@@ -98,6 +98,39 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->cx > last_col(e, e->cy)) e->cx = last_col(e, e->cy);
 }
 
+/** @brief Whether byte @p c is a control byte, which is drawn as a mark. Tabs are left alone for now. */
+static int is_control(unsigned char c) {
+	return (c < 0x20 && c != '\t') || c == 0x7f;
+}
+
+/** @brief Width in columns of byte @p c as drawn: a control byte is a two-column mark such as ^A. */
+static size_t cell_width(unsigned char c) {
+	return is_control(c) ? 2 : 1;
+}
+
+/** @brief Display column of byte index @p cx in @p line: the width of the bytes before it. */
+static size_t display_col(const char *line, size_t cx) {
+	size_t col = 0;
+	for (size_t i = 0; i < cx && line[i]; i++) col += cell_width((unsigned char)line[i]);
+	return col;
+}
+
+/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a mark. */
+static void put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
+	size_t col = 0;
+	for (const unsigned char *p = (const unsigned char *)line; *p; p++) {
+		size_t w = cell_width(*p);
+		if (w > max_cols - col) break;
+		if (is_control(*p)) {
+			char mark[2] = { '^', *p == 0x7f ? '?' : (char)(*p ^ 0x40) };
+			put(out, pos, max, mark, 2);
+		} else {
+			put(out, pos, max, (const char *)p, 1);
+		}
+		col += w;
+	}
+}
+
 size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
 	if (out_size == 0) return 0;
 	size_t max = out_size - 1; /* room for the NUL */
@@ -105,11 +138,8 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
 	size_t avail = e->rowoff < e->count ? e->count - e->rowoff : 0;
 	if (avail > max_rows) avail = max_rows;
 	for (size_t i = 0; i < avail; i++) {
-		const char *line = e->lines[e->rowoff + i];
-		size_t len = strlen(line);
-		if (len > max_cols) len = max_cols;
 		if (i > 0) put(out, &pos, max, "\r\n", 2);
-		put(out, &pos, max, line, len);
+		put_line(e->lines[e->rowoff + i], max_cols, out, &pos, max);
 	}
 	out[pos] = '\0';
 	return pos;
@@ -167,7 +197,7 @@ size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *ou
 	size_t pos = CLEAR_HOME_LEN;
 	pos += editor_render(e, max_rows, max_cols, out + pos, out_size - pos - CURSOR_SEQ_MAX);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
-	size_t col = e->cx;
+	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
 	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
 	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", row + 1, col + 1);
 	return pos;

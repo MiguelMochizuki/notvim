@@ -715,6 +715,56 @@ static void test_editor_load_refuses_a_nul_at_the_start_of_a_line(void) {
 	assert_load_refused("a\n\0b\n", 5);
 }
 
+/** @brief Render the shared editor with @p max_cols columns and compare with @p expected. */
+static void assert_render_cols(size_t max_cols, const char *expected) {
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_render(&e, ALL_ROWS, max_cols, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief An escape character is drawn as the mark ^[ so that it cannot reach the terminal. */
+static void test_editor_render_shows_escape_as_a_mark(void) {
+	editor_init(&e);
+	append("a\x1b[2Jb");
+	assert_render_cols(ALL_COLS, "a^[[2Jb");
+}
+
+/** @brief Other control bytes become ^ plus a letter, and 0x7f becomes ^?. */
+static void test_editor_render_shows_other_control_bytes_as_marks(void) {
+	editor_init(&e);
+	append("\x01x\x1f\x7f\r");
+	assert_render_cols(ALL_COLS, "^Ax^_^?^M");
+}
+
+/** @brief Bytes of 0x80 and above, such as UTF-8 text, are not control bytes here. */
+static void test_editor_render_leaves_high_bytes_alone(void) {
+	editor_init(&e);
+	append("caf\xc3\xa9");
+	assert_render_cols(ALL_COLS, "caf\xc3\xa9");
+}
+
+/** @brief Clipping counts the two columns of a mark and never shows half of one. */
+static void test_editor_render_clips_on_whole_marks(void) {
+	editor_init(&e);
+	append("ab\x01" "cd");
+	assert_render_cols(4, "ab^A");
+	assert_render_cols(3, "ab");   /* ^A needs two columns and only one is left */
+	assert_render_cols(2, "ab");
+	assert_render_cols(5, "ab^Ac");
+}
+
+/** @brief The drawn cursor column counts the width of the marks before it. */
+static void test_editor_draw_cursor_column_counts_marks(void) {
+	editor_init(&e);
+	append("\x01" "bc");
+	e.cx = 1; /* on the b, after the two-column mark ^A */
+	assert_draw(24, CLEAR_HOME "^Abc" "\x1b[1;3H");
+	e.cx = 0; /* on the mark itself: its first column */
+	assert_draw(24, CLEAR_HOME "^Abc" "\x1b[1;1H");
+	e.cx = 2;
+	assert_draw(24, CLEAR_HOME "^Abc" "\x1b[1;4H");
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -742,6 +792,11 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_clips_lines_to_max_cols);
 	RUN_TEST(test_editor_render_zero_cols_keeps_the_rows);
 	RUN_TEST(test_editor_draw_clips_lines_and_clamps_the_cursor_column);
+	RUN_TEST(test_editor_render_shows_escape_as_a_mark);
+	RUN_TEST(test_editor_render_shows_other_control_bytes_as_marks);
+	RUN_TEST(test_editor_render_leaves_high_bytes_alone);
+	RUN_TEST(test_editor_render_clips_on_whole_marks);
+	RUN_TEST(test_editor_draw_cursor_column_counts_marks);
 	RUN_TEST(test_editor_load_three_lines);
 	RUN_TEST(test_editor_load_no_trailing_newline);
 	RUN_TEST(test_editor_load_empty_file);
