@@ -19,18 +19,13 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H3.2** As user, I want to type characters in insert mode and see them in the buffer
-  - Ordinary printable keys in insert mode are ignored today (H3.1): `editor_handle_key()` is where typing goes.
-  - The cursor may already sit after the last character in insert mode (`cx` equal to the length of the line).
+- **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
+  - Reuse the line helpers of `editor.c` (`line_insert()`); add delete, split and join next to it. Both set `modified`.
 
 ## To do
 
-Order of work: H3.2 and H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
-
-### H3 Insert mode
-
-- **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
 
 ### H4 Saving and quitting
 
@@ -124,6 +119,11 @@ Do these once insert mode and yank exist.
 
 ### H3 Insert mode
 
+- **H3.2** As user, I want to type characters in insert mode and see them in the buffer
+  - Design: `line_insert()` grows a line with `realloc` and sets the new `editor_t.modified` flag (cleared by load); `type_char()` creates the first line of an empty editor and moves `cx` and `wantcol`.
+  - Design: a UTF-8 character arrives as consecutive key bytes; `editor_t.pend` and `pend_len` collect it and only a complete valid one is inserted. The status line adds ` [+]` after the name and `[dos]`.
+  - Decisions: checked against Vim 9.1: `ixy` then `Esc` leaves the cursor on `y`; an empty buffer gets one line; `Tab` types `\t`. `h j k l` and every printable key are typed in insert mode.
+  - Known gaps: an incomplete or invalid byte sequence is dropped silently; other control keys do nothing; `Ctrl+Q` still quits without asking about `[+]` (H4).
 - **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
   - Design: `editor_t.mode` (`EDITOR_MODE_NORMAL`/`INSERT`); `editor_handle_key()` in `editor.c` dispatches keys by mode (moved out of `main.c`, unit-testable); `main` redraws when it returns non-zero.
   - Design: `editor_move_cursor()` and `col_to_cx()` allow `cx == strlen(line)` in insert mode; the status label comes from `editor_mode_label()`.
