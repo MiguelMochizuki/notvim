@@ -15,7 +15,8 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
+- **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
+  - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
 
 ## To do
 
@@ -24,8 +25,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
-  - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
 
 ### H0 Development foundations
 
@@ -135,7 +134,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Known gaps:
     - A lone `ESC` is never reported (needs a timeout): see H6.1.
     - `cx` counts bytes, so UTF-8 text puts the cursor mid-character: see H6.8.
-    - No remembered "wanted column" when passing through short lines (Vim's curswant): see H6.10.
+    - No remembered "wanted column" when passing through short lines (Vim's curswant): done in H6.10.
 - **H2.2** As user, I want to move the cursor with `h j k l`, as in Vim
   - The mapping is `key_to_move` in `main.c`, tested end to end on a pty. It behaves exactly like the arrows, so the clamping rules are not retested.
   - Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
@@ -209,7 +208,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - `draw_buffer_size()` now allows 4 bytes per column (`rows * (cols * 4 + 2) + EDITOR_DRAW_OVERHEAD`), tested end to end with 2, 3 and 4-byte characters, at startup and on a resize.
   - Decisions: each invalid byte is its own `?` (a truncated euro sign is `??`). A C1 control (U+0080 to U+009F, some terminals act on them) is one cell of two bytes drawn as one `?`.
   - A vertical move that lands inside a character snaps back to its start; a clamp goes to the start of the last character. `cx` stays a byte index.
-  - Known gaps: double-width (CJK) and combining characters take one column each. `cx` is a byte index, so the cursor can drift left on multi-byte lines: see H6.10 (remembered column).
+  - Known gaps: double-width (CJK) and combining characters take one column each. `cx` is a byte index, which made the cursor drift left on multi-byte lines: closed by H6.10 (remembered display column).
   - Known gaps: the mutant "Left steps one byte" survives because the snap puts the cursor back on the character start (equivalent). Invalid UTF-8 is shown as `?`, so saving (H4.1) must keep the original bytes.
 - **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
   - Reproduced: `abc\r\ndef\r\n` was drawn as `abc\r\r\ndef\r`.
@@ -217,3 +216,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Decisions: a file is CRLF only if it has at least one terminated line and every one has the `\r`. A last line without a newline is ignored for the detection and keeps a trailing `\r`. LF, empty and mixed files are left alone, so a stray `\r` shows as `^M`.
   - `crlf` is reset by `editor_init`, `editor_free` and every load, failed or not. No change to the rendering. The tests use files of 60 KB and a 10000-byte line so that a decision from the first read block would fail.
   - Known gaps: saving is not built (H4.1) and must write `\r\n` when `crlf` is set. A mixed file keeps its `\r` on the lines that have it, and the editor cannot tell the user the file is mixed.
+- **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
+  - Design: `editor_t.wantcol` is the wanted display column (Vim's curswant). Up and down keep it and pick, with `col_to_cx`, the character whose first display column is the largest one not above it; the last character if the line is shorter, 0 on an empty line.
+  - Because it works in display columns it is right with tabs, `^X` marks, `?` cells and UTF-8 characters. The comparison never adds to `wantcol`, so a huge value cannot overflow. `init`, `free` and every load reset it to 0.
+  - Decisions (checked against Vim 9.1): only a left or right move that really moves the cursor sets `wantcol`. `l` on the last character or on an empty line, and `h` at column 0, keep it: `5l j l j` still ends on column 5. A successful `h` resets it (`5l j h j` gives 0). Up on the first line and down on the last keep it.
+  - Code that assigns `cx` directly (future insert mode) must set `wantcol` too. The wanted column does not depend on scrolling (tested on a pty).
+  - Known gaps: on a tab Vim puts the cursor on its last column and remembers that; notvim uses the first column (H6.4), so going down from a tab lands one tab-width left of where Vim would. Wide (CJK) characters count one column (H6.8).
