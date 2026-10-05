@@ -112,6 +112,8 @@ Do these once insert mode and yank exist.
   - Decisions: LF only unless loaded as CRLF; a lone CR and invalid bytes are written as stored; a missing final newline is added (Vim does, checked); a symlink is written through.
   - Decisions: `:w name` adopts the name only when there is no path, and writing to another name leaves `[+]`, as in Vim; message `"name" [New] [dos] 12L, 345B written`; `:w name` on another existing file is `E13` and `:w!` overrides it (Vim-checked; own file compared by inode); `:w` on a read-only own file is `E45`, `:w!` writes it and keeps the mode.
   - Known gaps: hard links are lost by the rename; no `fsync` of the directory; no backup file; owner and group of an existing file are not kept.
+  - Known gaps: a file in a non-writable directory cannot be saved (the temp file cannot be created; Vim could write in place); a 1-row terminal hides the command line and messages.
+  - Known gaps: a command line wider than the terminal is cut, Vim scrolls it; a fast `Esc` plus a key in one write is parsed as an Alt chord and both keys are dropped (`src/keys.c`).
 
 ### H3 Insert mode
 

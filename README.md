@@ -56,6 +56,10 @@ The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 - Double-width (CJK, emoji) and combining characters take one column each in notvim, but the terminal draws wide ones in two. A long line of them wraps onto the next row, pushes the rows below down and can scroll the screen; the cursor column is off too (planned as H6.12).
 - Horizontal scrolling moves one column at a time; Vim's default recentres the cursor (half a screen) and there is no `sidescrolloff`.
 - Invalid UTF-8 and C1 controls are shown as `?` (saved as they were).
+- A command line wider than the terminal is cut at the right edge; Vim scrolls it.
+- A fast `Esc` followed by a key in the same write (within 50 ms) is read as an Alt chord and both keys are dropped; Vim treats it as `Esc` and then the key.
+- `:w` needs to create a temporary file next to the target, so a file in a directory you cannot write cannot be saved (Vim could fall back to writing in place).
+- A terminal of one row has no room for the command line or messages: `:q` is typed blind and an error is not shown.
 - `:w` loses hard links (the rename makes a new file), does not `fsync` the directory, keeps no backup file and does not keep the owner and group.
 
 ## Line endings

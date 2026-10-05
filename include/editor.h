@@ -32,8 +32,9 @@ typedef struct {
 	                     directly must set @c wantcol too. */
 	editor_mode_t mode; /**< Current mode; @ref EDITOR_MODE_NORMAL after init, free and load. In insert mode @c cx may equal the
 	                         length of the line (the cursor is after the last character); in normal mode it never does. */
-	int modified; /**< Non-zero once the text has been changed (typing); 0 after init, free and load. The status line shows
-	                   "[+]" while it is set. */
+	int modified; /**< Non-zero once the text has been changed (any edit: typing, Enter, Backspace, Delete); 0 after init, free and
+	                   load, and after a successful ":w" to the editor's own file (writing to another name leaves it). The
+	                   status line shows "[+]" while it is set. */
 	cmdline_t cmd; /**< The command line being typed in @ref EDITOR_MODE_COMMAND; emptied when that mode starts and ends. */
 	char *msg;     /**< Owned message, or NULL: shown on the bottom row instead of the status line until the next key (see editor_set_message()). */
 	int quit;      /**< Non-zero once a quit was asked for (":q", ":wq", ":x", "ZZ", "ZQ", Ctrl+Q) and allowed; the caller then ends its input loop
@@ -45,7 +46,7 @@ typedef struct {
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
 	                   0 for an LF, mixed or empty file, no file, or after an error. */
 	char *path;   /**< Owned copy of the path given to the last successful editor_load_file(), even if that file does not
-	                   exist (a saver creates it); NULL after editor_init(), after editor_free() and after a failed load. */
+	                   exist (a saver creates it), or of the name that ":w name" wrote first when there was none; NULL after editor_init(), after editor_free() and after a failed load. */
 } editor_t;
 
 /** Directions for editor_move_cursor(). */
