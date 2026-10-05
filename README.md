@@ -27,11 +27,13 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | Nothing: the robustness epic (H6) is finished |
-| Editing | Insert mode, typing characters, `Backspace` and `Enter` |
-| Navigation | Scrolling long lines horizontally |
-| Files | Saving with `:w`, quitting with `:q` and `:q!` |
-| Interface | A status line with file name, mode and cursor position |
+| In progress | A status line with file name, mode and cursor position |
+| Editing core | Insert mode (`i`, `Esc`), typing, `Backspace` and `Enter`, saving with `:w`, quitting with `:q` and `:q!` |
+| Navigation | Scrolling long lines horizontally; double-width characters |
+| Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
+| Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
+| Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, `:wq` |
+| Mouse and clipboard | Wheel scrolling that keeps native selection, yanking to the system clipboard, bracketed paste |
 
 ## Known limitations
 

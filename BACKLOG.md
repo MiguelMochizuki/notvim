@@ -12,42 +12,24 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 | H4 | Saving and quitting |
 | H5 | Interface |
 | H6 | Robustness with real files and terminals |
+| H7 | Mouse and clipboard |
+| H8 | Motions (as in Vim) |
+| H9 | Editing commands (as in Vim) |
+| H10 | Search and command line (as in Vim) |
 
 ## In progress
 
-(nothing in progress)
+- **H5.1** As user, I want a status line with file name, mode and cursor position, so that I always know where I am and what the editor is doing
+  - Why first: insert mode (H3) is hard to use without seeing the mode, so the status line goes before it.
+  - The last terminal row becomes the status line; the text window is `rows - 1` (`editor_scroll`, `draw`, `editor_render` already take the row count). `main` uses the full terminal height today (a gap noted in H2.3).
+  - Content: file name (or `[No Name]`), mode label (`NORMAL` until H3.1), and `line,col` with the display column. Truncated to the terminal width without cutting a character.
+  - `editor_load_file` remembers the path in the editor (H4.1 needs it to save).
+  - Known to check: the status row must not trigger the pending-wrap problem of H6.11 (a full-width status line has no `ESC[K`).
 
 ## To do
 
-### H6 Robustness with real files and terminals
-
-Each story below was reproduced against the real binary on a pty.
-They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
-H6.1 to H6.11 are done (see Done below). H6.12 was found by the final review of the epic.
-
-- **H6.12** As user, I want double-width (CJK, emoji) and combining characters to take the right number of columns
-  - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
-    notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
-    The drawn cursor column and `ESC[K` land in the wrong place too.
-  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
-    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
-  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
-  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
-    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
-
-
-### H0 Development foundations
-
-- **H0.11** As dev, I want the remaining test gaps closed where practical
-  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
-  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
-  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
-
-### H2 Navigation
-
-- **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
-  - Same mechanism as `rowoff`, for columns: `coloff`, `editor_scroll` with the width, the drawn cursor column relative to it.
-  - Until then the cursor stops on the last visible column of a clipped line.
+Order of work: H5.1, H3.1 to H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H3 Insert mode
 
@@ -66,10 +48,81 @@ H6.1 to H6.11 are done (see Done below). H6.12 was found by the final review of 
   - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
 - **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
 
-### H5 Interface
+### H2 Navigation
 
-- **H5.1** As user, I want a status line with file name, mode and cursor position
-  - `main` scrolls with the full terminal height today; the status line needs `rows - 1` (H2.3).
+- **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
+  - Same mechanism as `rowoff`, for columns: `coloff`, `editor_scroll` with the width, the drawn cursor column relative to it.
+  - Until then the cursor stops on the last visible column of a clipped line.
+
+### H6 Robustness with real files and terminals
+
+Each story below was reproduced against the real binary on a pty or found by a review. H6.1 to H6.11 are done (see Done below).
+
+- **H6.12** As user, I want double-width (CJK, emoji) and combining characters to take the right number of columns
+  - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
+    notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
+    The drawn cursor column and `ESC[K` land in the wrong place too.
+  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
+    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
+  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
+  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
+    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
+- **H6.13** As dev, I want the hardening items deferred by the reviews of epic H6 closed
+  - Leaving the alternate screen can wait forever on a non-blocking stdout whose reader never drains (for example output stopped with `Ctrl+S`): `terminal_write_all` polls with no timeout, and `SIGTERM` only makes `poll` return `EINTR`, which is retried.
+  - A hangup followed by a key can exit 1 instead of 129 when the redraw fails before the stop pipe is polled.
+  - `terminal_enter_alt_screen` failing at startup is ignored by `main`.
+  - A file name with control characters is printed raw in the load error message: draw it with the `^X` marks of H6.3.
+  - The out-of-memory message is printed while the alternate screen is active; the line walks and the tab loop at the right edge deserve another look; the pty `screen()` helper depends on the last spawned pty size (74 call sites).
+
+### H0 Development foundations
+
+- **H0.11** As dev, I want the remaining test gaps closed where practical
+  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
+  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
+  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
+
+### H8 Motions (as in Vim)
+
+- **H8.1** As user, I want `0`, `^` and `$` to go to the start, the first non-blank character and the end of the line
+- **H8.2** As user, I want `w`, `b` and `e` (and `W`, `B`, `E`) to move by words
+- **H8.3** As user, I want `gg` and `G` to go to the first and last line, and `{count}G` to go to a given line
+- **H8.4** As user, I want counts before motions (`5j`, `3w`, `10l`)
+- **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
+- **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
+- **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
+
+### H9 Editing commands (as in Vim)
+
+- **H9.1** As user, I want `a`, `A`, `I`, `o` and `O` to enter insert mode in the usual places
+- **H9.2** As user, I want `x`, `X`, `r{char}` and `~` to change single characters
+- **H9.3** As user, I want `dd`, `D`, `cc`, `C` and `J` to delete, change and join lines
+- **H9.4** As user, I want operators with motions (`dw`, `d$`, `cw`, `y2j`) and counts (`3dd`)
+- **H9.5** As user, I want `u` and `Ctrl+r` to undo and redo, so I can fix mistakes
+- **H9.6** As user, I want `yy`, `p` and `P` and the unnamed register to copy and paste inside the editor
+- **H9.7** As user, I want `.` to repeat the last change
+- **H9.8** As user, I want visual mode (`v`, `V`) with `d`, `y` and `c`
+
+### H10 Search and command line (as in Vim)
+
+- **H10.1** As user, I want `/` and `?` to search forward and backward, and `n` and `N` to repeat
+- **H10.2** As user, I want `*` and `#` to search for the word under the cursor
+- **H10.3** As user, I want `:s` and `:%s` to substitute text
+- **H10.4** As user, I want `:set number` to show line numbers
+- **H10.5** As user, I want `:e file`, `:w file`, `:wq`, `:x` and `ZZ`
+
+### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
+
+The user wants to scroll with the mouse wheel and still copy and paste with the mouse, and hates that yanking in Vim is local to Vim.
+Do these once insert mode and yank exist.
+
+- **H7.1** As user, I want to scroll with the mouse wheel and still select text with the mouse to copy it
+  - Use alternate scroll mode: `ESC [ ? 1007 h` on entering the alternate screen and `l` on leaving. In the alternate screen the terminal turns the wheel into Up and Down arrow keys, and native selection keeps working.
+  - Do not enable mouse reporting (`?1000`, `?1002`, `?1006`): it takes clicks and drags away from the terminal, so selecting would need Shift.
+- **H7.2** As user, I want yanked text to reach the system clipboard, so yanking is not local to the editor
+  - `OSC 52`: `ESC ] 52 ; c ; <base64> BEL`. It works over SSH and base64 cannot inject commands. Terminals differ (kitty, alacritty, foot, wezterm, iTerm2 yes; xterm needs a setting; some ignore it).
+  - Fallback: an external tool (`wl-copy`, `xclip`, `xsel`) only if one is already installed, found at run time. Never installed by us. The editor's own register keeps working.
+- **H7.3** As user, I want to paste from the system clipboard as text, never as commands
+  - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
 
 ## Done
 
