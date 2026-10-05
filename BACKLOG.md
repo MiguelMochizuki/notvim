@@ -15,8 +15,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
-  - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
+(nothing in progress)
 
 ## To do
 
@@ -24,6 +23,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
+All of them are done (see Done below): this epic is finished.
 
 
 ### H0 Development foundations
@@ -145,7 +145,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
     - `editor_render` starts at `rowoff`, and `editor_draw` puts the cursor on row `cy - rowoff + 1`.
     - `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0.
   - Decisions: vertical only, one line at a time (no half-page jumps or `scrolloff` margin). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state.
-  - Known gaps: no rows are reserved for a status line yet (H5.1). The whole screen is still redrawn after every key (H6.11).
+  - Known gaps: no rows are reserved for a status line yet (H5.1). The whole screen is still redrawn after every key, without clearing it first since H6.11.
 - **H2.4** As user, I want the editor to draw on the alternate screen and clip lines to the terminal width, so that my shell screen is left untouched and the first lines never scroll out of view
   - Found by running `./notvim BACKLOG.md` in a real terminal emulator, which the pty tests could not show.
   - Clipping: lines wider than the terminal wrapped onto extra rows, so the screen overflowed and the terminal scrolled the title away.
@@ -222,3 +222,16 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Decisions (checked against Vim 9.1): only a left or right move that really moves the cursor sets `wantcol`. `l` on the last character or on an empty line, and `h` at column 0, keep it: `5l j l j` still ends on column 5. A successful `h` resets it (`5l j h j` gives 0). Up on the first line and down on the last keep it.
   - Code that assigns `cx` directly (future insert mode) must set `wantcol` too. The wanted column does not depend on scrolling (tested on a pty).
   - Known gaps: on a tab Vim puts the cursor on its last column and remembers that; notvim uses the first column (H6.4), so going down from a tab lands one tab-width left of where Vim would. Wide (CJK) characters count one column (H6.8).
+- **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
+  - Reproduced: every key sent `ESC[2J` and redrew everything, and a short `write()` (full pty or pipe, a signal) lost the rest.
+  - Design: `editor_draw` hides the cursor, goes home, draws each row (`ESC[K` after a row narrower than the screen),
+    moves to the first free row and erases below, positions the cursor and shows it. `editor_render` stays pure text.
+  - `terminal_write_all` continues partial writes, retries `EINTR`, waits with `poll` on `EAGAIN`, returns 0 or -1 with `errno`.
+    `main` writes every redraw with it and leaves the loop if it fails.
+  - Decisions: a character in the last column leaves the terminal in "pending wrap", and `ESC[K` or `ESC[J` would erase it.
+    So a full-width row gets no `ESC[K`, and the erase below starts with an explicit move to the next row (checked by hand in GNU screen).
+  - A row that does not fit the buffer is dropped whole, never cut: no escape sequence or character is ever half written.
+  - `EDITOR_DRAW_OVERHEAD` is 88 (worst-case tail); `draw_buffer_size()` allows 4 bytes per column, `ESC[K` and CR LF per row.
+  - SIGPIPE is not handled: stdout must be a terminal (H6.5), and a terminal never raises it.
+  - Known gaps: byte tests cannot show what a terminal draws, so the screen itself was only checked by hand.
+    A failing redraw ends the loop (exit 1 at startup); that is not tested. The whole window is still sent after each key (no diffing).
