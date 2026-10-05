@@ -429,7 +429,7 @@ static void test_editor_cursor_up_clamps_column(void) {
 	assert_cursor(0, 1);
 }
 
-/** @brief An empty line has column 0, and the old column is not remembered afterwards. */
+/** @brief An empty line has column 0; a move to the right there does not move, so the old column is kept (as in Vim). */
 static void test_editor_cursor_on_empty_line_and_no_remembered_column(void) {
 	editor_init(&e);
 	append("abcdef");
@@ -441,7 +441,7 @@ static void test_editor_cursor_on_empty_line_and_no_remembered_column(void) {
 	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
 	assert_cursor(1, 0);
 	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
-	assert_cursor(2, 0);
+	assert_cursor(2, 4);
 }
 
 /** @brief Loading a file puts the cursor back at 0,0. */
@@ -1451,6 +1451,7 @@ static void test_editor_cursor_up_clamps_to_the_start_of_the_last_character(void
 	append("abcdef");
 	e.cy = 1;
 	e.cx = 5;
+	e.wantcol = 5; /* set by hand: the wanted column follows moves, not assignments */
 	editor_move_cursor(&e, EDITOR_MOVE_UP);
 	assert_cursor(0, 1);
 }
@@ -1469,31 +1470,24 @@ static void test_editor_cursor_vertical_clamp_uses_invalid_bytes_and_c1_as_chara
 	assert_cursor(2, 1);
 }
 
-/** @brief A vertical move that lands inside a character moves the cursor back to the start of that character. */
+/**
+ * @brief A vertical move lands on a character start, chosen by display column (H6.10): it never lands inside a character.
+ * @note Before H6.10 these moves snapped the byte index back (cx 1 -> 0, cx 3 -> 2); now the wanted display column decides.
+ */
 static void test_editor_cursor_vertical_move_never_lands_inside_a_character(void) {
 	editor_init(&e);
 	append("abcdef");
-	append("\xc3\xa9\xe2\x82\xac" "z"); /* characters start at 0, 2, 5 */
-	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* cx 1: inside the e-acute on the next line */
+	append("\xc3\xa9\xe2\x82\xac" "z"); /* characters start at bytes 0, 2, 5 and at display columns 0, 1, 2 */
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* wanted column 1 */
 	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
-	assert_cursor(1, 0);
+	assert_cursor(1, 2); /* the euro sign: column 1, byte 2 */
 	editor_free(&e);
 	editor_init(&e);
 	append("abcdef");
 	append("\xc3\xa9\xe2\x82\xac" "z");
-	move_n(EDITOR_MOVE_RIGHT, 3); /* cx 3: inside the euro sign */
+	move_n(EDITOR_MOVE_RIGHT, 3); /* wanted column 3: past the last character */
 	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
-	assert_cursor(1, 2);
-}
-
-/** @brief Down onto a line where the column is already a character start keeps the byte index. */
-static void test_editor_cursor_vertical_move_keeps_a_valid_byte_index(void) {
-	editor_init(&e);
-	append("\xc3\xa9\xe2\x82\xac" "z");
-	append("abcdefgh");
-	e.cx = 5; /* the z */
-	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
-	assert_cursor(1, 5);
+	assert_cursor(1, 5); /* the z, the last character */
 }
 
 /** @brief The cursor on the last 4-byte character, exactly at the width, is drawn on that last column. */
@@ -1514,6 +1508,457 @@ static void test_editor_render_crlf_file_has_no_marks_and_mixed_file_has(void) {
 	assert_render_cols(ALL_COLS, "a\r\nb");
 	load_text("a\r\nb\n");
 	assert_render_cols(ALL_COLS, "a^M\r\nb");
+}
+
+/** @brief Right moves by @p n, then down once: the cursor of the shared editor ends on the second line. */
+static void right_then_down(int n) {
+	move_n(EDITOR_MOVE_RIGHT, n);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+}
+
+/** @brief Long, short, long: the cursor returns to its column, going down and going up. */
+static void test_editor_wanted_column_comes_back_after_a_short_line(void) {
+	editor_init(&e);
+	append("abcdefgh");
+	append("ab");
+	append("abcdefgh");
+	move_n(EDITOR_MOVE_RIGHT, 6);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 6);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 6);
+}
+
+/** @brief An empty line in the middle is passed through without losing the column. */
+static void test_editor_wanted_column_survives_an_empty_line(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("");
+	append("abcdef");
+	move_n(EDITOR_MOVE_RIGHT, 4);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 4);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 4);
+}
+
+/** @brief The wanted column is far beyond every shorter line: it keeps landing on the last character, and the long line gets it back. */
+static void test_editor_wanted_column_far_beyond_short_lines_lands_on_the_last_character(void) {
+	editor_init(&e);
+	append("abcdefghijklmnopqrst");
+	append("abc");
+	append("abcdef");
+	append("abcdefghijklmnopqrst");
+	move_n(EDITOR_MOVE_RIGHT, 19);
+	assert_cursor(0, 19);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(3, 19);
+	move_n(EDITOR_MOVE_UP, 3);
+	assert_cursor(0, 19);
+}
+
+/** @brief A wanted column equal to the line length is past the last character; one less is on it. */
+static void test_editor_wanted_column_at_the_edge_of_a_short_line(void) {
+	editor_init(&e);
+	append("abcd");
+	append("ab");
+	right_then_down(2); /* wanted 2: the line has columns 0 and 1 */
+	assert_cursor(1, 1);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcd");
+	append("ab");
+	right_then_down(1); /* wanted 1: the b */
+	assert_cursor(1, 1);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcd");
+	append("abc");
+	right_then_down(3); /* wanted 3 on a line of 3 columns: the last character */
+	assert_cursor(1, 2);
+}
+
+/** @brief A left move that really moves sets the wanted column to the display column of the new cx (Vim: `5l j h j` gives 0). */
+static void test_editor_left_sets_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab");
+	append("abcdef");
+	right_then_down(5);
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT); /* a left move that moves */
+	assert_cursor(1, 0);
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 0);
+}
+
+/** @brief A right move that does not move (last character) keeps the wanted column, as in Vim: `5l j l j` ends on column 5. */
+static void test_editor_right_that_does_not_move_keeps_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab");
+	append("abcdef");
+	right_then_down(5);
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* does not move: it is the last character */
+	assert_cursor(1, 1);
+	TEST_ASSERT_EQUAL_UINT(5, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 5);
+}
+
+/** @brief Left at column 0 and right on an empty line do not move, and keep the wanted column (Vim: `5l j h j` on an empty middle line gives 5). */
+static void test_editor_left_that_does_not_move_keeps_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("");
+	append("abcdef");
+	right_then_down(5);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(1, 0);
+	TEST_ASSERT_EQUAL_UINT(5, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	TEST_ASSERT_EQUAL_UINT(5, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 5);
+}
+
+/** @brief After a vertical move, left and right start from the real cx and not from the wanted column. */
+static void test_editor_left_and_right_start_from_the_real_cursor_after_a_vertical_move(void) {
+	editor_init(&e);
+	append("abcdefgh");
+	append("abc");
+	right_then_down(6); /* wanted 6, the cursor is on the c, cx 2 */
+	assert_cursor(1, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(1, 1); /* not column 5 */
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 1);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcdefgh");
+	append("abc");
+	right_then_down(6);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(1, 2); /* stays on the last character, not column 7 */
+}
+
+/** @brief Up on the first line does nothing, and the wanted column is kept. */
+static void test_editor_up_on_the_first_line_keeps_the_wanted_column(void) {
+	editor_init(&e);
+	append("ab");
+	append("abcdefgh");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	move_n(EDITOR_MOVE_RIGHT, 6);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_UP); /* first line: nothing happens */
+	assert_cursor(0, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 6);
+}
+
+/** @brief Down on the last line does nothing, and the wanted column is kept. */
+static void test_editor_down_on_the_last_line_keeps_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdefgh");
+	append("ab");
+	right_then_down(6);
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN); /* last line: nothing happens */
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 6);
+}
+
+/** @brief Left and right set @c wantcol in display columns: a tab, a multi-byte character and the end of the line. */
+static void test_editor_horizontal_moves_set_the_wanted_column_in_display_columns(void) {
+	editor_init(&e);
+	append("\xc3\xa9\t\xe2\x82\xac" "x"); /* e-acute at column 0 (byte 0), tab 1 to 7 (byte 2), euro 8 (byte 3), x 9 (byte 6) */
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 2);
+	TEST_ASSERT_EQUAL_UINT(1, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(8, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	TEST_ASSERT_EQUAL_UINT(9, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* at the end: does not move, the wanted column stays 9 */
+	TEST_ASSERT_EQUAL_UINT(9, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(8, e.wantcol);
+}
+
+/** @brief Vertical moves do not change @c wantcol, even when the cursor is clamped, or when there is no line to go to. */
+static void test_editor_vertical_moves_keep_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdefgh");
+	append("ab");
+	move_n(EDITOR_MOVE_RIGHT, 6);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol);
+}
+
+/** @brief A wanted column inside a tab picks the tab (it starts at or before the column); the next character is picked from its own column. */
+static void test_editor_wanted_column_inside_a_tab_picks_the_tab(void) {
+	const int cols[] = { 0, 3, 7 }; /* the tab at the start of the line spans columns 0 to 7 */
+	for (size_t i = 0; i < 3; i++) {
+		editor_init(&e);
+		append("abcdefghij");
+		append("\txy");
+		right_then_down(cols[i]);
+		assert_cursor(1, 0);
+		editor_free(&e);
+	}
+	editor_init(&e);
+	append("abcdefghij");
+	append("\txy");
+	right_then_down(8);
+	assert_cursor(1, 1); /* the x starts at column 8 */
+}
+
+/** @brief A tab in the middle of a line, after a '?' cell: its columns depend on what comes before it. */
+static void test_editor_wanted_column_inside_a_tab_in_the_middle_of_a_line(void) {
+	editor_init(&e);
+	append("abcdefghij");
+	append("ab\tc"); /* ab 0-1, tab 2-7 (byte 2), c at column 8 (byte 3) */
+	right_then_down(6);
+	assert_cursor(1, 2);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcdefghij");
+	append("ab\tc");
+	right_then_down(8);
+	assert_cursor(1, 3);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcdefghij");
+	append("\xff\tx"); /* '?' at column 0, tab 1 to 7 (byte 1), x at column 8 (byte 2) */
+	right_then_down(5);
+	assert_cursor(1, 1);
+}
+
+/** @brief The cursor on a tab and moving down uses the tab's first column, not the column it was drawn up to. */
+static void test_editor_wanted_column_from_a_tab_is_its_first_column(void) {
+	editor_init(&e);
+	append("ab\tc"); /* the tab starts at column 2 (byte 2) */
+	append("abcdefghij");
+	move_n(EDITOR_MOVE_RIGHT, 2);
+	assert_cursor(0, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* the c, at column 8 */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 8);
+}
+
+/** @brief A wanted column on either column of a ^X mark picks the mark; the next character is picked from its own column. */
+static void test_editor_wanted_column_on_a_mark_picks_the_mark(void) {
+	const int cols[] = { 1, 2 }; /* a at column 0, ^A at columns 1 and 2 (byte 1), b at column 3 (byte 2) */
+	for (size_t i = 0; i < 2; i++) {
+		editor_init(&e);
+		append("abcdef");
+		append("a\x01" "b");
+		right_then_down(cols[i]);
+		assert_cursor(1, 1);
+		editor_free(&e);
+	}
+	editor_init(&e);
+	append("abcdef");
+	append("a\x01" "b");
+	right_then_down(3);
+	assert_cursor(1, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_UP); /* from the b (column 3) back up */
+	assert_cursor(0, 3);
+}
+
+/** @brief Going up from a mark line: the wanted column is the first column of the mark. */
+static void test_editor_wanted_column_from_a_mark_is_its_first_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("a\x01" "b");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	move_n(EDITOR_MOVE_RIGHT, 1); /* on the mark, byte 1 */
+	assert_cursor(1, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* the b: column 3 */
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 3);
+}
+
+/** @brief Multi-byte characters count one column each: the byte index is not the wanted column, in either direction. */
+static void test_editor_wanted_column_with_multibyte_characters(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z"); /* columns 0 1 2 3 at bytes 0 2 5 9 */
+	right_then_down(2);
+	assert_cursor(1, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(1, 9);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 3);
+	editor_free(&e);
+	editor_init(&e);
+	append("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+	append("abcdef");
+	move_n(EDITOR_MOVE_RIGHT, 2); /* byte 5, column 2 */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2); /* the c: not byte 5 */
+}
+
+/** @brief Invalid bytes and C1 controls are one column each, in the wanted column too. */
+static void test_editor_wanted_column_after_question_mark_cells(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("\xff\xc2\x85\xfe" "b"); /* cells at bytes 0, 1 (two bytes), 3, 4: columns 0 1 2 3 */
+	right_then_down(2);
+	assert_cursor(1, 3);
+	editor_free(&e);
+	editor_init(&e);
+	append("\xff\xc2\x85\xfe" "b");
+	append("abcdef");
+	move_n(EDITOR_MOVE_RIGHT, 2); /* byte 3, column 2 */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+}
+
+/** @brief Put the cursor of the shared editor on line 0 with the wanted column @p want, set by hand, and go down. */
+static void down_with_wanted_column(size_t want) {
+	e.wantcol = want;
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+}
+
+/** @brief A huge wanted column lands on the last character without overflow, even for a line whose first character is not the last. */
+static void test_editor_a_huge_wanted_column_lands_on_the_last_character(void) {
+	const size_t huge[] = { (size_t)-1, (size_t)-1 - 1, (size_t)-1 / 2, (size_t)-1 / 2 + 1 };
+	for (size_t i = 0; i < 4; i++) {
+		editor_init(&e);
+		append("abcdef");
+		append("ab");
+		down_with_wanted_column(huge[i]);
+		assert_cursor(1, 1);
+		editor_move_cursor(&e, EDITOR_MOVE_UP);
+		assert_cursor(0, 5);
+		editor_free(&e);
+	}
+	editor_init(&e);
+	append("abcdef");
+	append("\xc3\xa9\t\xe2\x82\xac");
+	down_with_wanted_column((size_t)-1);
+	assert_cursor(1, 3); /* the euro sign, the last character */
+}
+
+/** @brief When the last character is a tab, a wanted column anywhere from its start to far beyond picks the tab (Vim: `9l j` onto "ab<tab>" gives byte 2). */
+static void test_editor_wanted_column_beyond_a_line_that_ends_in_a_tab(void) {
+	const size_t wanted[] = { 2, 7, 8, 9, 100, (size_t)-1 }; /* "ab" then a tab: columns 2 to 7, width 8 */
+	for (size_t i = 0; i < 6; i++) {
+		editor_init(&e);
+		append("abcdefghij");
+		append("ab\t");
+		down_with_wanted_column(wanted[i]);
+		assert_cursor(1, 2);
+		editor_free(&e);
+	}
+	editor_init(&e);
+	append("abcdefghij");
+	append("ab\t");
+	down_with_wanted_column(1); /* before the tab: the b */
+	assert_cursor(1, 1);
+}
+
+/** @brief When the last character is a ^X mark, a wanted column from its first column to far beyond picks it (Vim: `9l j` onto "a^A" gives byte 1). */
+static void test_editor_wanted_column_beyond_a_line_that_ends_in_a_mark(void) {
+	const size_t wanted[] = { 1, 2, 3, 4, 100, (size_t)-1 }; /* "a" then a mark: columns 1 and 2, width 3 */
+	for (size_t i = 0; i < 6; i++) {
+		editor_init(&e);
+		append("abcdefghij");
+		append("a\x01");
+		down_with_wanted_column(wanted[i]);
+		assert_cursor(1, 1);
+		editor_free(&e);
+	}
+}
+
+/** @brief When the last character has 4 bytes, a wanted column at or beyond its column picks it, not byte len - 1 and not the character before. */
+static void test_editor_wanted_column_beyond_a_line_that_ends_in_a_four_byte_character(void) {
+	const size_t wanted[] = { 1, 2, 3, 100, (size_t)-1 }; /* "a" then the emoji: one column each, bytes 0 and 1 */
+	for (size_t i = 0; i < 5; i++) {
+		editor_init(&e);
+		append("abcdefghij");
+		append("a\xf0\x9f\x98\x80");
+		down_with_wanted_column(wanted[i]);
+		assert_cursor(1, 1);
+		editor_free(&e);
+	}
+}
+
+/** @brief Wanted column 0 goes to the start of a line that begins with a tab or a multi-byte character. */
+static void test_editor_wanted_column_zero_goes_to_the_start_of_the_line(void) {
+	const char *lines[] = { "\txy", "\xc3\xa9z", "\x01z", "\xff" "z" };
+	for (size_t i = 0; i < 4; i++) {
+		editor_init(&e);
+		append("abcdef");
+		append(lines[i]);
+		down_with_wanted_column(0);
+		assert_cursor(1, 0);
+		editor_free(&e);
+	}
+}
+
+/** @brief Loading a file, init and free reset the wanted column: after them, down keeps cx 0. */
+static void test_editor_wanted_column_is_reset_by_init_free_and_load(void) {
+	memset(&e, 0xff, sizeof(e));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+	e.wantcol = 7;
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+	e.wantcol = 7;
+	const char *path = tmpdir_write("want.txt", "abcdefgh\nabcdefgh\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+	e.wantcol = 7;
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_path("nope.txt")));
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+	e.wantcol = 7;
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, tmpdir_path(".")));
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+}
+
+/** @brief A column wanted before loading a new file does not leak into it: the cursor starts at column 0. */
+static void test_editor_a_loaded_file_starts_with_no_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("abcdef");
+	move_n(EDITOR_MOVE_RIGHT, 5);
+	const char *path = tmpdir_write("want.txt", "abcdefgh\nabcdefgh\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
 }
 
 /** @brief Register every test in this file with Unity. */
@@ -1616,7 +2061,6 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_cursor_up_clamps_to_the_start_of_the_last_character);
 	RUN_TEST(test_editor_cursor_vertical_clamp_uses_invalid_bytes_and_c1_as_characters);
 	RUN_TEST(test_editor_cursor_vertical_move_never_lands_inside_a_character);
-	RUN_TEST(test_editor_cursor_vertical_move_keeps_a_valid_byte_index);
 	RUN_TEST(test_editor_load_crlf_file_drops_the_cr_and_sets_crlf);
 	RUN_TEST(test_editor_load_lf_file_is_not_crlf);
 	RUN_TEST(test_editor_load_empty_and_missing_files_are_not_crlf);
@@ -1653,4 +2097,30 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_draw_cursor_column_after_question_mark_cells_and_a_tab);
 	RUN_TEST(test_editor_cursor_stays_put_on_an_empty_line_and_at_the_start);
 	RUN_TEST(test_editor_draw_cursor_on_the_last_four_byte_character_at_the_width);
+	RUN_TEST(test_editor_wanted_column_comes_back_after_a_short_line);
+	RUN_TEST(test_editor_wanted_column_survives_an_empty_line);
+	RUN_TEST(test_editor_wanted_column_far_beyond_short_lines_lands_on_the_last_character);
+	RUN_TEST(test_editor_wanted_column_at_the_edge_of_a_short_line);
+	RUN_TEST(test_editor_left_sets_the_wanted_column);
+	RUN_TEST(test_editor_right_that_does_not_move_keeps_the_wanted_column);
+	RUN_TEST(test_editor_left_that_does_not_move_keeps_the_wanted_column);
+	RUN_TEST(test_editor_left_and_right_start_from_the_real_cursor_after_a_vertical_move);
+	RUN_TEST(test_editor_up_on_the_first_line_keeps_the_wanted_column);
+	RUN_TEST(test_editor_down_on_the_last_line_keeps_the_wanted_column);
+	RUN_TEST(test_editor_horizontal_moves_set_the_wanted_column_in_display_columns);
+	RUN_TEST(test_editor_vertical_moves_keep_the_wanted_column);
+	RUN_TEST(test_editor_wanted_column_inside_a_tab_picks_the_tab);
+	RUN_TEST(test_editor_wanted_column_inside_a_tab_in_the_middle_of_a_line);
+	RUN_TEST(test_editor_wanted_column_from_a_tab_is_its_first_column);
+	RUN_TEST(test_editor_wanted_column_on_a_mark_picks_the_mark);
+	RUN_TEST(test_editor_wanted_column_from_a_mark_is_its_first_column);
+	RUN_TEST(test_editor_wanted_column_with_multibyte_characters);
+	RUN_TEST(test_editor_wanted_column_after_question_mark_cells);
+	RUN_TEST(test_editor_wanted_column_is_reset_by_init_free_and_load);
+	RUN_TEST(test_editor_a_loaded_file_starts_with_no_wanted_column);
+	RUN_TEST(test_editor_a_huge_wanted_column_lands_on_the_last_character);
+	RUN_TEST(test_editor_wanted_column_beyond_a_line_that_ends_in_a_tab);
+	RUN_TEST(test_editor_wanted_column_beyond_a_line_that_ends_in_a_mark);
+	RUN_TEST(test_editor_wanted_column_beyond_a_line_that_ends_in_a_four_byte_character);
+	RUN_TEST(test_editor_wanted_column_zero_goes_to_the_start_of_the_line);
 }

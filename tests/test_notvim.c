@@ -942,13 +942,13 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 	const char *text = "abcdef\r\n\xc3\xa9\xc3\xa9\xc3\xa9\r\nabcdef";
 	struct { const char *keys; int row, col; } steps[] = {
 		{ "l", 1, 2 }, { "l", 1, 3 }, { "l", 1, 4 },
-		{ "j", 2, 2 },        /* byte 3 is inside the second e-acute: snap back to its start, column 2 */
-		{ "\x1b[C", 2, 3 },   /* right arrow: next character, byte 4 */
-		{ "\x1b[A", 1, 5 },   /* up: byte 4 on an ASCII line */
-		{ "\x1b[D", 1, 4 },   /* left arrow */
-		{ "j", 2, 2 },        /* byte 3 again: snap */
-		{ "h", 2, 1 },        /* left: previous character, byte 0 */
-		{ "k", 1, 1 },
+		{ "j", 2, 3 },        /* wanted column 3 is past the last e-acute (columns 0 to 2): the last character, byte 4, column 3 */
+		{ "\x1b[C", 2, 3 },   /* right arrow: already on the last character, it does not move and keeps the wanted column 3 */
+		{ "\x1b[A", 1, 4 },   /* up: column 3 of the ASCII line, byte 3 */
+		{ "\x1b[D", 1, 3 },   /* left arrow: a real move, the wanted column is now 2 */
+		{ "j", 2, 3 },        /* wanted column 2: the third e-acute, byte 4 */
+		{ "h", 2, 2 },        /* left: the second e-acute, wanted column 1 */
+		{ "k", 1, 2 },
 	};
 	char keys[64] = "", expected[4096] = "";
 	for (size_t i = 0; i < COUNT(steps); i++) {
@@ -963,6 +963,91 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	/* every key redraws once and in order, so the keys can go in one write and the redraws come back concatenated */
+	send_and_read(master, keys, got, sizeof(got));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_STRING(expected, got);
+}
+
+/** @brief Arrow keys and h j k l over uneven lines (short, empty, tab, multi-byte) remember the column, with the exact screens. */
+static void test_notvim_remembers_the_column_over_uneven_lines(void) {
+	const char *path = tmpdir_write("uneven.txt", "abcdefgh\nab\n\nabcdefgh\n\xc3\xa9\t\xe2\x82\xac" "x\n");
+	TEST_ASSERT_NOT_NULL(path);
+	/* the tab of the last line is drawn as seven spaces: e-acute at column 0, tab 1 to 7, euro sign at 8, x at 9 */
+	const char *text = "abcdefgh\r\nab\r\n\r\nabcdefgh\r\n\xc3\xa9       \xe2\x82\xac" "x";
+	struct { const char *keys; int row, col; } steps[] = {
+		{ "l", 1, 2 }, { "l", 1, 3 }, { "l", 1, 4 }, { "l", 1, 5 }, { "l", 1, 6 },   /* wanted column 5 */
+		{ "\x1b[B", 2, 2 },   /* "ab": the last character */
+		{ "l", 2, 2 },        /* does not move, so the wanted column 5 is kept (Vim: `5l j l j` ends on column 5) */
+		{ "\x1b[B", 3, 1 },   /* the empty line */
+		{ "h", 3, 1 },        /* does not move either */
+		{ "\x1b[B", 4, 6 },   /* back to column 5 */
+		{ "\x1b[B", 5, 2 },   /* column 5 is inside the tab (columns 1 to 7): the tab starts at column 1 */
+		{ "\x1b[A", 4, 6 },
+		{ "\x1b[B", 5, 2 },
+		{ "\x1b[C", 5, 9 },   /* right arrow: the euro sign, column 8: the wanted column is now 8 */
+		{ "\x1b[A", 4, 8 },   /* the line has 8 columns: its last character */
+		{ "k", 3, 1 },
+		{ "k", 2, 2 },
+		{ "k", 1, 8 },        /* column 8 on the first line: its last character, column 7 */
+		{ "h", 1, 7 },        /* the wanted column is now 6 */
+		{ "j", 2, 2 },
+		{ "j", 3, 1 },
+		{ "j", 4, 7 },
+	};
+	char keys[256] = "", expected[16384] = "";
+	for (size_t i = 0; i < COUNT(steps); i++) {
+		char one[512];
+		strcat(keys, steps[i].keys);
+		screen(one, sizeof(one), text, steps[i].row, steps[i].col);
+		strcat(expected, one);
+	}
+	int master;
+	char first[1024], got[16384];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, keys, got, sizeof(got)); /* one write: every key redraws once, in order */
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_STRING(expected, got);
+}
+
+/** @brief The remembered column survives a scroll: down past the bottom of a 4-row window and back up. */
+static void test_notvim_remembers_the_column_across_a_scroll(void) {
+	const char *lines[] = { "abcdefghij", "ab", "ab", "ab", "ab", "abcdefghij" };
+	const char *path = tmpdir_write("scroll.txt", "abcdefghij\nab\nab\nab\nab\nabcdefghij\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char keys[64] = "lllll", expected[16384] = "";
+	int cy = 0, rowoff = 0, cx = 5;
+	/* five l, five j (the window scrolls by two rows), five k: every key redraws once */
+	for (int i = 0; i < 15; i++) {
+		char key = i < 5 ? 'l' : (i < 10 ? 'j' : 'k');
+		if (i >= 5) strncat(keys, &key, 1);
+		if (key == 'l') cx = i + 1;
+		if (key == 'j') cy++;
+		if (key == 'k') cy--;
+		if (cy >= rowoff + 4) rowoff = cy - 3;
+		if (cy < rowoff) rowoff = cy;
+		int len = (int)strlen(lines[cy]);
+		int col = cx < len ? cx : len - 1;
+		char text[256] = "", one[512];
+		for (int r = rowoff; r < rowoff + 4; r++) {
+			if (r > rowoff) strcat(text, "\r\n");
+			strcat(text, lines[r]);
+		}
+		screen(one, sizeof(one), text, cy - rowoff + 1, col + 1);
+		strcat(expected, one);
+	}
+	int master;
+	char first[1024], got[16384];
+	pid_t pid = spawn_notvim(path, 4, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
 	send_and_read(master, keys, got, sizeof(got));
 	int status = quit_and_wait(master, pid);
 	close(master);
@@ -1071,4 +1156,6 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_navigates_by_character_with_keys_and_arrows);
 	RUN_TEST(test_notvim_shows_a_crlf_file_without_marks);
 	RUN_TEST(test_notvim_shows_a_mixed_file_with_marks);
+	RUN_TEST(test_notvim_remembers_the_column_over_uneven_lines);
+	RUN_TEST(test_notvim_remembers_the_column_across_a_scroll);
 }

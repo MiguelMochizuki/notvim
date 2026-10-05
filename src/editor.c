@@ -19,6 +19,7 @@ void editor_init(editor_t *e) {
 	e->count = 0;
 	e->cap = 0;
 	e->crlf = 0;
+	e->wantcol = 0;
 	e->cy = 0;
 	e->cx = 0;
 	e->rowoff = 0;
@@ -75,35 +76,6 @@ void editor_scroll(editor_t *e, size_t rows) {
 	}
 }
 
-/** @brief Start of the last cell on line @p y (a character or an invalid byte), or 0 for an empty line. */
-static size_t last_col(const editor_t *e, size_t y) {
-	return utf8_prev(e->lines[y], strlen(e->lines[y]));
-}
-
-void editor_move_cursor(editor_t *e, editor_move_t dir) {
-	if (e->count == 0) return;
-	const char *line;
-	switch (dir) {
-	case EDITOR_MOVE_UP:
-		if (e->cy > 0) e->cy--;
-		break;
-	case EDITOR_MOVE_DOWN:
-		if (e->cy + 1 < e->count) e->cy++;
-		break;
-	case EDITOR_MOVE_LEFT:
-		line = e->lines[e->cy];
-		e->cx = utf8_prev(line, e->cx);
-		break;
-	case EDITOR_MOVE_RIGHT:
-		line = e->lines[e->cy];
-		e->cx += utf8_cell_len(line + e->cx); /* clamped below */
-		break;
-	}
-	size_t last = last_col(e, e->cy);
-	if (e->cx > last) e->cx = last;
-	else e->cx = utf8_prev(e->lines[e->cy], e->cx + 1); /* a vertical move can land inside a character: back to its start */
-}
-
 /** Tabs stop at every multiple of this many columns. */
 #define TAB_STOP 8
 
@@ -127,6 +99,45 @@ static size_t display_col(const char *line, size_t cx) {
 	size_t col = 0;
 	for (size_t i = 0; i < cx && line[i]; i += utf8_cell_len(line + i)) col += cell_width(line + i, col);
 	return col;
+}
+
+/** @brief Start of the last cell on line @p y (a character or an invalid byte), or 0 for an empty line. */
+static size_t last_col(const editor_t *e, size_t y) {
+	return utf8_prev(e->lines[y], strlen(e->lines[y]));
+}
+
+/** @brief Byte index of the character of @p line whose first display column is the largest one not above @p want; the last character if @p line is shorter, 0 if it is empty. */
+static size_t col_to_cx(const char *line, size_t want) {
+	size_t col = 0, best = 0;
+	for (size_t i = 0; line[i]; i += utf8_cell_len(line + i)) {
+		if (col > want) break; /* compared without adding to @p want, so a huge value cannot wrap */
+		best = i;
+		col += cell_width(line + i, col);
+	}
+	return best;
+}
+
+void editor_move_cursor(editor_t *e, editor_move_t dir) {
+	if (e->count == 0) return;
+	const char *line = e->lines[e->cy];
+	size_t old_cx = e->cx;
+	switch (dir) {
+	case EDITOR_MOVE_UP:
+		if (e->cy > 0) e->cx = col_to_cx(e->lines[--e->cy], e->wantcol);
+		return;
+	case EDITOR_MOVE_DOWN:
+		if (e->cy + 1 < e->count) e->cx = col_to_cx(e->lines[++e->cy], e->wantcol);
+		return;
+	case EDITOR_MOVE_LEFT:
+		e->cx = utf8_prev(line, e->cx);
+		break;
+	case EDITOR_MOVE_RIGHT:
+		e->cx += utf8_cell_len(line + e->cx); /* clamped below */
+		break;
+	}
+	size_t last = last_col(e, e->cy);
+	if (e->cx > last) e->cx = last;
+	if (e->cx != old_cx) e->wantcol = display_col(line, e->cx); /* only a move that moves forgets the old column, as in Vim */
 }
 
 /** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a character or a mark. */

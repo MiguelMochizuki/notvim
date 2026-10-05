@@ -15,6 +15,10 @@ typedef struct {
 	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
 	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte). */
 	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
+	size_t wantcol; /**< Wanted display column (Vim's curswant): where up and down try to put the cursor, so that it comes
+	                     back to its column after a shorter line. Set by a left or right move that moves; 0 after init, free
+	                     and load. @c cx and @c wantcol change together in editor_move_cursor(): code that assigns @c cx
+	                     directly must set @c wantcol too. */
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
 	                   0 for an LF, mixed or empty file, no file, or after an error. */
 } editor_t;
@@ -100,12 +104,20 @@ int editor_append_line(editor_t *e, const char *text);
  * character of the line, as in Vim's normal mode. Text is UTF-8: left and
  * right move one character, an invalid byte counts as one character, and a C1
  * control (U+0080 to U+009F) is one character of two bytes. @c cx stays a
- * byte index and never points inside a character: moving to a shorter line
- * clamps it to the start of the last character, and a move that lands inside a
- * character puts it back on that character's start (so it can drift left over
- * multi-byte lines, as the column is not remembered across lines). An empty
- * line has column 0. An editor with no lines keeps the
- * cursor at 0,0.
+ * byte index and never points inside a character.
+ *
+ * The cursor remembers a wanted display column in @c wantcol, as in Vim. A
+ * left or right move that really moves the cursor sets it to the display
+ * column of the new @c cx (a tab or a mark counts from its first column). A
+ * move that does not move (right on the last character or on an empty line,
+ * left at column 0) leaves it alone. Up and down keep it: the new @c cx is the
+ * start of the character whose first display column is the largest one not
+ * above @c wantcol, so a column inside a tab or a two-column mark picks that
+ * tab or mark; if every character of the line starts before @c wantcol the
+ * cursor goes to the last character, and on an empty line to 0. Up on the
+ * first line and down on the last change nothing, @c wantcol included, so the
+ * cursor comes back to its column after passing a shorter line. An editor
+ * with no lines keeps the cursor at 0,0.
  *
  * @param e   Editor to modify; must not be NULL.
  * @param dir Direction to move.
