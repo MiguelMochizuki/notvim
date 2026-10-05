@@ -15,12 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.1** As user, I want a lone `Esc` to be recognised after a short timeout, so that it never swallows the next key I press
-  - Reproduced: after `Esc`, even a second later, the next `j` does nothing (the decoder is still waiting for an escape sequence, H2.1). A key is lost today.
-  - Proposed design: `main` waits on stdin with `poll()`.
-    - If no byte follows an `ESC` within a short time (about 50 ms), the decoder reports `KEY_ESC`.
-    - This leaves the raw-mode flags and their tests alone. The alternative is `VMIN`/`VTIME`.
-  - Needed by H3.1.
+- **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
+  - Reproduced: a line `a\0b` is drawn as `a`. With `:w` (H4.1) the rest of the line would be lost.
+  - Refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
 
 ## To do
 
@@ -29,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
-  - Reproduced: a line `a\0b` is drawn as `a`. With `:w` (H4.1) the rest of the line would be lost.
-  - Refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
 - **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
   - Reproduced: a file containing `ESC [ 2 J` clears the screen when it is displayed.
   - The marks are wider than the byte they replace, so the cursor and the clipping must count columns (shared with H6.4 and H6.8).
@@ -71,7 +65,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
 ### H3 Insert mode
 
 - **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
-  - Depends on H6.1: `Esc` must be recognised.
+  - `Esc` is now recognised (H6.1): the decoder reports `KEY_ESC`.
   - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
 - **H3.2** As user, I want to type characters in insert mode and see them in the buffer
 - **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
@@ -186,3 +180,12 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Known gaps:
     - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal: see H6.4 and H6.8.
     - The tests check the exact byte stream on a pty; what a real emulator shows was checked by hand.
+
+### H6 Robustness with real files and terminals
+
+- **H6.1** As user, I want a lone `Esc` to be recognised after a short timeout, so that it never swallows the next key I press
+  - Reproduced: after `Esc`, even a second later, the next `j` did nothing (the decoder was still waiting for an escape sequence, H2.1).
+  - Design: the decoder stays pure and gets the time from outside. `key_parser_pending` says whether it is inside a sequence, and `key_parser_timeout` turns a lone `ESC` into `KEY_ESC` or abandons a longer sequence.
+  - `main` waits on stdin with `poll()`: without limit when idle, `KEY_ESC_TIMEOUT_MS` (50 ms) while a sequence is pending. The raw-mode flags and their tests are unchanged (`VMIN`/`VTIME` was the alternative).
+  - `KEY_ESC` is reported but nothing uses it yet; H3.1 will leave insert mode with it.
+  - Known gap: a terminal that sends the bytes of an arrow key more than 50 ms apart (a very slow link) would be read as `Esc` followed by `[` and a letter.
