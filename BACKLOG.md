@@ -2,13 +2,10 @@
 
 ## In progress
 
-- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
-> Design (H2.1): three small steps, each with its own commits. (1) A pure key decoder (`keys.c`): fed one byte at a time, it turns `ESC [ A/B/C/D` into `KEY_UP/DOWN/RIGHT/LEFT`, ignores any other escape sequence (for example `ESC [ 3 ~`) without breaking the next key, and passes ordinary bytes through, `Ctrl+Q` included. (2) A cursor in `editor_t` (`cy`, `cx`, byte indexes) with `editor_move_cursor`: no wrapping, up/down clamp to the lines and the column to the line length, right stops on the last character (Vim normal mode), an empty editor keeps the cursor at 0,0. (3) `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence, and the main loop redraws after each key.
-> Decisions (H2.1): `editor_render` stays pure text, so its tests do not change. A lone `ESC` is not told apart from the start of a sequence (that needs a timeout, planned with H3.1). The cursor may move below the visible rows until scrolling (H2.3). No remembered "wanted column" when moving through short lines (Vim's curswant), and `cx` is a byte index, so non-ASCII text puts the cursor mid-character; both are left for later.
+- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 
 ## To do
 
-- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 - H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
 - H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
 - H3.2: As user, I want to type characters in insert mode and see them in the buffer
@@ -44,3 +41,11 @@
 > Known gaps: the out-of-memory path of `editor_load_file` and the cleanup after a read error halfway through a file are not tested.
 - H0.9: As dev, I want a failing editor test to not leak, so that sanitizer reports never bury the test output
 > Notice (H0.9): the tests in `test_editor.c` share one file-level editor that `tearDown` frees (via `test_editor_teardown`), because a failed Unity assertion jumps out of the test and skips any cleanup written at its end. Rule for new tests: allocate through the shared editor or on the stack, never with a bare `malloc` that needs a `free` at the end.
+- H0.10: As dev, I want objects rebuilt when an included header changes, so that a struct change cannot leave stale objects behind
+> Notice (H0.10): found while adding the cursor fields to `editor_t`: `main.o` was not rebuilt, was compiled against the old, smaller struct, and `notvim` crashed in `editor_init`. The Makefile now uses `-MMD -MP` and includes the `.d` files; `make clean` removes them.
+- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
+> Design (H2.1): three small steps, each with its own commits (as implemented). (1) A pure key decoder (`keys.c`): fed one byte at a time, it turns `ESC [ A/B/C/D` into `KEY_UP/DOWN/RIGHT/LEFT`, ignores any other escape sequence (for example `ESC [ 3 ~`) without breaking the next key, and passes ordinary bytes through, `Ctrl+Q` included. (2) A cursor in `editor_t` (`cy`, `cx`, byte indexes) with `editor_move_cursor`: no wrapping, up/down clamp to the lines and the column to the line length, right stops on the last character (Vim normal mode), an empty editor keeps the cursor at 0,0. (3) `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence, and the main loop redraws after each key.
+> Decisions (H2.1): `editor_render` stays pure text, so its tests do not change. A lone `ESC` is not told apart from the start of a sequence (that needs a timeout, planned with H3.1). The cursor may move below the visible rows until scrolling (H2.3). No remembered "wanted column" when moving through short lines (Vim's curswant), and `cx` is a byte index, so non-ASCII text puts the cursor mid-character; both are left for later.
+> Notice (H2.1): `editor_draw` redraws the whole screen after every move (no diffing) and reserves `EDITOR_DRAW_OVERHEAD` bytes so the cursor sequence is never cut. `main` guards `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte (an equivalent mutant today, kept on purpose). Ordinary keys and swallowed sequences do not redraw.
+> Known gaps (H2.1): a lone `ESC` is never reported; the cursor can sit below the visible rows (terminal clamps it) until H2.3; `cx` counts bytes, so UTF-8 text puts the cursor mid-character; no remembered column when passing through short lines.
+
