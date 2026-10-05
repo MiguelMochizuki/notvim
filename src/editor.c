@@ -17,6 +17,8 @@ void editor_init(editor_t *e) {
 	e->lines = NULL;
 	e->count = 0;
 	e->cap = 0;
+	e->cy = 0;
+	e->cx = 0;
 }
 
 void editor_free(editor_t *e) {
@@ -59,6 +61,31 @@ static void put(char *out, size_t *pos, size_t max, const char *src, size_t len)
 	size_t n = len < room ? len : room;
 	memcpy(out + *pos, src, n);
 	*pos += n;
+}
+
+/** @brief Last valid column on line @p y: its last character, or 0 for an empty line. */
+static size_t last_col(const editor_t *e, size_t y) {
+	size_t len = strlen(e->lines[y]);
+	return len ? len - 1 : 0;
+}
+
+void editor_move_cursor(editor_t *e, editor_move_t dir) {
+	if (e->count == 0) return;
+	switch (dir) {
+	case EDITOR_MOVE_UP:
+		if (e->cy > 0) e->cy--;
+		break;
+	case EDITOR_MOVE_DOWN:
+		if (e->cy + 1 < e->count) e->cy++;
+		break;
+	case EDITOR_MOVE_LEFT:
+		if (e->cx > 0) e->cx--;
+		break;
+	case EDITOR_MOVE_RIGHT:
+		e->cx++; /* clamped below */
+		break;
+	}
+	if (e->cx > last_col(e, e->cy)) e->cx = last_col(e, e->cy);
 }
 
 size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_size) {

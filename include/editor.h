@@ -12,7 +12,17 @@ typedef struct {
 	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
 	size_t count; /**< Number of lines in use in @ref lines. */
 	size_t cap;   /**< Allocated capacity of @ref lines, in lines. */
+	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
+	size_t cx;    /**< Cursor column: byte index in that line. */
 } editor_t;
+
+/** Directions for editor_move_cursor(). */
+typedef enum {
+	EDITOR_MOVE_UP,    /**< One line up. */
+	EDITOR_MOVE_DOWN,  /**< One line down. */
+	EDITOR_MOVE_LEFT,  /**< One column left. */
+	EDITOR_MOVE_RIGHT  /**< One column right. */
+} editor_move_t;
 
 /**
  * @brief Tell whether a key press should quit the editor.
@@ -22,7 +32,7 @@ typedef struct {
 int editor_should_exit(char c);
 
 /**
- * @brief Initialise @p e as an empty editor with no lines. Does not allocate.
+ * @brief Initialise @p e as an empty editor with no lines and the cursor at 0,0. Does not allocate.
  * @param e Editor to initialise; must not be NULL and is not read first.
  */
 void editor_init(editor_t *e);
@@ -60,6 +70,21 @@ const char *editor_line(const editor_t *e, size_t i);
  * @return 0 on success, -1 on failure (errno is ENOMEM); @p e is unchanged on failure.
  */
 int editor_append_line(editor_t *e, const char *text);
+
+/**
+ * @brief Move the cursor one step in direction @p dir.
+ *
+ * The cursor never wraps and never leaves the text: up and down stop at the
+ * first and last line, left stops at column 0, and right stops on the last
+ * character of the line, as in Vim's normal mode. Moving to a shorter line
+ * clamps the column to its last character; an empty line has column 0. The
+ * column is not remembered across lines. An editor with no lines keeps the
+ * cursor at 0,0.
+ *
+ * @param e   Editor to modify; must not be NULL.
+ * @param dir Direction to move.
+ */
+void editor_move_cursor(editor_t *e, editor_move_t dir);
 
 /**
  * @brief Render the first @p max_rows lines into @p out as a NUL-terminated string.

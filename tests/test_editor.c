@@ -335,6 +335,127 @@ static void test_editor_load_unreadable_file_fails_with_eacces(void) {
 	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
 }
 
+/** @brief Append @p text to the shared editor, failing the test if that does not work. */
+static void append(const char *text) {
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, text));
+}
+
+/** @brief Assert that the cursor of the shared editor is at row @p y, column @p x. */
+static void assert_cursor(size_t y, size_t x) {
+	TEST_ASSERT_EQUAL_UINT(y, e.cy);
+	TEST_ASSERT_EQUAL_UINT(x, e.cx);
+}
+
+/** @brief A fresh editor has the cursor at 0,0. */
+static void test_editor_cursor_starts_at_origin(void) {
+	editor_init(&e);
+	assert_cursor(0, 0);
+	append("abc");
+	assert_cursor(0, 0);
+}
+
+/** @brief Moving in an editor with no lines keeps the cursor at 0,0. */
+static void test_editor_cursor_does_not_move_without_lines(void) {
+	editor_init(&e);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(0, 0);
+}
+
+/** @brief Right moves along the line and stops on the last character. */
+static void test_editor_cursor_right_stops_on_last_character(void) {
+	editor_init(&e);
+	append("abc");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 2);
+}
+
+/** @brief Left moves back and stops at column 0, without wrapping to the previous line. */
+static void test_editor_cursor_left_stops_at_column_zero(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(1, 0);
+}
+
+/** @brief Up and down move between lines and stop at the first and last one. */
+static void test_editor_cursor_vertical_moves_stop_at_the_ends(void) {
+	editor_init(&e);
+	append("a");
+	append("b");
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 0);
+}
+
+/** @brief Moving down onto a shorter line clamps the column to its last character. */
+static void test_editor_cursor_down_clamps_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab");
+	for (int i = 0; i < 5; i++) editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 1);
+}
+
+/** @brief Moving up onto a shorter line clamps the column too. */
+static void test_editor_cursor_up_clamps_column(void) {
+	editor_init(&e);
+	append("ab");
+	append("abcdef");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	for (int i = 0; i < 5; i++) editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(1, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 1);
+}
+
+/** @brief An empty line has column 0, and the old column is not remembered afterwards. */
+static void test_editor_cursor_on_empty_line_and_no_remembered_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("");
+	append("abcdef");
+	for (int i = 0; i < 4; i++) editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(1, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(2, 0);
+}
+
+/** @brief Loading a file puts the cursor back at 0,0. */
+static void test_editor_load_resets_the_cursor(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(1, 1);
+	const char *path = tmpdir_write("cursor.txt", "x\ny\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	assert_cursor(0, 0);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -368,4 +489,13 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_load_missing_file_discards_old_contents);
 	RUN_TEST(test_editor_load_directory_fails_with_eisdir);
 	RUN_TEST(test_editor_load_unreadable_file_fails_with_eacces);
+	RUN_TEST(test_editor_cursor_starts_at_origin);
+	RUN_TEST(test_editor_cursor_does_not_move_without_lines);
+	RUN_TEST(test_editor_cursor_right_stops_on_last_character);
+	RUN_TEST(test_editor_cursor_left_stops_at_column_zero);
+	RUN_TEST(test_editor_cursor_vertical_moves_stop_at_the_ends);
+	RUN_TEST(test_editor_cursor_down_clamps_column);
+	RUN_TEST(test_editor_cursor_up_clamps_column);
+	RUN_TEST(test_editor_cursor_on_empty_line_and_no_remembered_column);
+	RUN_TEST(test_editor_load_resets_the_cursor);
 }
