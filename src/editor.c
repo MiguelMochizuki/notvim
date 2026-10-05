@@ -20,6 +20,8 @@ void editor_init(editor_t *e) {
 	e->count = 0;
 	e->cap = 0;
 	e->crlf = 0;
+	e->modified = 0;
+	e->pend_len = 0;
 	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
 	e->cy = 0;
@@ -329,6 +331,59 @@ const char *editor_mode_label(const editor_t *e) {
 	return e->mode == EDITOR_MODE_INSERT ? "INSERT" : "NORMAL";
 }
 
+/**
+ * @brief Insert the @p n bytes of @p s (no NUL among them) into line @p y of @p e at byte index @p at, growing the line with realloc.
+ *
+ * Sets @c modified. The cursor is not touched. Task 4's delete and split reuse this file's line helpers.
+ *
+ * @return 0 on success, -1 with the line unchanged if the memory can't be had.
+ */
+static int line_insert(editor_t *e, size_t y, size_t at, const char *s, size_t n) {
+	size_t len = strlen(e->lines[y]);
+	char *line = realloc(e->lines[y], len + n + 1);
+	if (!line) return -1;
+	memmove(line + at + n, line + at, len - at + 1); /* with the NUL */
+	memcpy(line + at, s, n);
+	e->lines[y] = line;
+	e->modified = 1;
+	return 0;
+}
+
+/** @brief Type the @p n bytes of one character at the cursor: create the first line if there is none, insert, and move the cursor and the wanted column past it. */
+static int type_char(editor_t *e, const char *s, size_t n) {
+	if (e->count == 0 && editor_append_line(e, "") < 0) return 0;
+	if (line_insert(e, e->cy, e->cx, s, n) < 0) return 0;
+	e->cx += n;
+	e->wantcol = display_col(e->lines[e->cy], e->cx);
+	return 1;
+}
+
+/**
+ * @brief Insert-mode key @p c (a byte) of typing: collect the bytes of a UTF-8 character in @c pend and type it when it is complete and valid.
+ * @return Non-zero if a character was typed.
+ */
+static int type_byte(editor_t *e, unsigned char c) {
+	if (e->pend_len > 0 && (c & 0xc0) == 0x80) {
+		e->pend[e->pend_len++] = (char)c;
+		unsigned char lead = (unsigned char)e->pend[0];
+		size_t need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
+		if (e->pend_len < need) return 0;
+		char buf[5];
+		memcpy(buf, e->pend, e->pend_len);
+		buf[e->pend_len] = '\0';
+		size_t n = e->pend_len;
+		e->pend_len = 0;
+		return utf8_valid_len(buf) == n ? type_char(e, buf, n) : 0;
+	}
+	e->pend_len = 0; /* a half character followed by anything else is dropped */
+	if (c >= 0xc2 && c <= 0xf4) { /* lead of a multibyte character; the rest decides if it is valid */
+		e->pend[e->pend_len++] = (char)c;
+		return 0;
+	}
+	if (c == '\t' || (c >= 0x20 && c < 0x7f)) return type_char(e, (const char *)&c, 1);
+	return 0; /* other control keys, stray continuation and invalid bytes */
+}
+
 /** @brief Leave insert mode: one character left unless at column 0, as Vim does; the wanted column follows even when the cursor stays. */
 static void leave_insert(editor_t *e) {
 	e->mode = EDITOR_MODE_NORMAL;
@@ -339,17 +394,17 @@ static void leave_insert(editor_t *e) {
 
 int editor_handle_key(editor_t *e, int key) {
 	editor_move_t dir;
+	if (e->mode == EDITOR_MODE_INSERT && key < 256) return type_byte(e, (unsigned char)key);
+	e->pend_len = 0;
 	switch (key) {
 	case KEY_UP: dir = EDITOR_MOVE_UP; break;
 	case KEY_DOWN: dir = EDITOR_MOVE_DOWN; break;
 	case KEY_LEFT: dir = EDITOR_MOVE_LEFT; break;
 	case KEY_RIGHT: dir = EDITOR_MOVE_RIGHT; break;
 	case 'k': case 'j': case 'h': case 'l':
-		if (e->mode == EDITOR_MODE_INSERT) return 0; /* typing comes later */
 		dir = key == 'k' ? EDITOR_MOVE_UP : key == 'j' ? EDITOR_MOVE_DOWN : key == 'h' ? EDITOR_MOVE_LEFT : EDITOR_MOVE_RIGHT;
 		break;
 	case 'i':
-		if (e->mode == EDITOR_MODE_INSERT) return 0;
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;
 	case KEY_ESC:
@@ -377,10 +432,10 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
 	} else {
 		const char *name = e->path && e->path[0] ? e->path : "[No Name]";
 		const char *mode = editor_mode_label(e);
-		char *left = malloc(strlen(name) + strlen(mode) + 8); /* name, " [dos]", " ", mode, NUL */
+		char *left = malloc(strlen(name) + strlen(mode) + 12); /* name, " [dos]", " [+]", " ", mode, NUL */
 		size_t used = 0;
 		if (left) {
-			sprintf(left, "%s%s %s", name, e->crlf ? " [dos]" : "", mode);
+			sprintf(left, "%s%s%s %s", name, e->crlf ? " [dos]" : "", e->modified ? " [+]" : "", mode);
 			used = put_line(left, cols - right_w - 1, out, &pos, max);
 			free(left);
 		}

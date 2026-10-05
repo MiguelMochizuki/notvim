@@ -43,9 +43,9 @@ void draw_expected_status(char *buf, size_t size, const char *text, size_t max_r
 	snprintf(buf + pos, size - pos, "%s", tail);
 }
 
-void status_expected(char *buf, size_t size, const char *name, int dos, const char *mode, size_t line, size_t col, size_t cols) {
+void status_expected(char *buf, size_t size, const char *name, int dos, int modified, const char *mode, size_t line, size_t col, size_t cols) {
 	char left[512], right[64];
-	snprintf(left, sizeof(left), "%s%s %s", name ? name : "[No Name]", dos ? " [dos]" : "", mode);
+	snprintf(left, sizeof(left), "%s%s%s %s", name ? name : "[No Name]", dos ? " [dos]" : "", modified ? " [+]" : "", mode);
 	size_t right_w = (size_t)snprintf(right, sizeof(right), "%zu,%zu", line, col);
 	if (right_w >= cols) {
 		snprintf(buf, size, "%.*s", (int)cols, right);

@@ -52,11 +52,12 @@ void draw_expected_status(char *buf, size_t size, const char *text, size_t max_r
  * @param size Size of @p buf.
  * @param name File name, or NULL for "[No Name]".
  * @param dos  Non-zero for a CRLF file: " [dos]" follows the name.
+ * @param modified Non-zero if the text was changed: " [+]" follows the name and the [dos].
  * @param mode Mode label, such as "NORMAL".
  * @param line Line of the cursor, 1-based.
  * @param col  Display column of the cursor, 1-based.
  * @param cols Width of the terminal.
  */
-void status_expected(char *buf, size_t size, const char *name, int dos, const char *mode, size_t line, size_t col, size_t cols);
+void status_expected(char *buf, size_t size, const char *name, int dos, int modified, const char *mode, size_t line, size_t col, size_t cols);
 
 #endif

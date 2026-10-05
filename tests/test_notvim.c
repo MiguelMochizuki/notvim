@@ -26,6 +26,8 @@ static unsigned short term_rows = 24, term_cols = 80;
 static char shown_name[1024] = "[No Name]";
 /** Whether the file of the last spawn is shown as a CRLF file: a test that loads one sets it after the spawn. */
 static int shown_dos;
+/** Whether the status line shows [+]: a test that types sets it before building the expected screens; reset by each spawn. */
+static int shown_modified;
 /** Mode label notvim shows in its status line: "NORMAL" after each spawn; a test that enters insert mode sets it before building the expected screens. */
 static const char *shown_mode = "NORMAL";
 
@@ -44,6 +46,7 @@ static pid_t spawn_notvim_full(const char *file, unsigned short rows, unsigned s
 	term_cols = cols;
 	snprintf(shown_name, sizeof(shown_name), "%s", file ? file : "[No Name]");
 	shown_dos = 0;
+	shown_modified = 0;
 	shown_mode = "NORMAL";
 	pid_t pid = forkpty(master, NULL, NULL, &ws);
 	if (pid == 0) {
@@ -146,7 +149,7 @@ static void screen_at(char *buf, size_t size, const char *text, int row, int col
 		draw_expected(buf, size, text, term_rows, term_cols, row, col);
 		return;
 	}
-	status_expected(status, sizeof(status), shown_name, shown_dos, shown_mode, (size_t)line, (size_t)fcol, term_cols);
+	status_expected(status, sizeof(status), shown_name, shown_dos, shown_modified, shown_mode, (size_t)line, (size_t)fcol, term_cols);
 	draw_expected_status(buf, size, text, (size_t)term_rows - 1, term_cols, status, term_rows, row, col);
 }
 
@@ -544,22 +547,36 @@ static void test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, esc);
 }
 
-/** @brief h, j, k, l do nothing in insert mode (no redraw); the arrows still do. */
-static void test_notvim_hjkl_do_nothing_in_insert_mode(void) {
-	const char *path = tmpdir_write("insignore.txt", "abc\ndef\n");
+/** @brief Typing in insert mode (h, j, k, l included) and an accented letter in two writes: the exact screen, with [+] in the status. */
+static void test_notvim_typing_in_insert_mode(void) {
+	const char *path = tmpdir_write("typing.txt", "abc\ndef\n");
 	TEST_ASSERT_NOT_NULL(path);
 	int master;
-	char first[1024], ins[1024], after[1024];
+	char first[1024], ins[1024], typed[1024], half[1024], acc[1024], esc[1024];
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	send_and_read(master, "i", ins, sizeof(ins));
-	size_t n = send_and_read(master, "hjkl", after, sizeof(after));
+	send_and_read(master, "hj", typed, sizeof(typed));
+	send_and_read(master, "\t", typed, sizeof(typed));
+	size_t n = send_and_read(master, "\xc3", half, sizeof(half));
+	send_and_read(master, "\xa9", acc, sizeof(acc));
+	send_and_read(master, "\x1b", esc, sizeof(esc));
 	int status = quit_and_wait(master, pid);
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	TEST_ASSERT_EQUAL_UINT(0, n);
+	TEST_ASSERT_EQUAL_UINT(0, n); /* half a character: nothing to draw */
+	char expected[1024];
+	shown_mode = "INSERT";
+	shown_modified = 1;
+	screen_at(expected, sizeof(expected), "hj      abc\r\ndef", 1, 9, 1, 9);
+	TEST_ASSERT_EQUAL_STRING(expected, typed);
+	screen_at(expected, sizeof(expected), "hj      \xc3\xa9" "abc\r\ndef", 1, 10, 1, 10);
+	TEST_ASSERT_EQUAL_STRING(expected, acc);
+	shown_mode = "NORMAL";
+	screen_at(expected, sizeof(expected), "hj      \xc3\xa9" "abc\r\ndef", 1, 9, 1, 9);
+	TEST_ASSERT_EQUAL_STRING(expected, esc);
 }
 
 /** @brief The status line says "[No Name] INSERT" in insert mode, literally, and Ctrl+Q quits from insert mode. */
@@ -1785,7 +1802,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);
 	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);
-	RUN_TEST(test_notvim_hjkl_do_nothing_in_insert_mode);
+	RUN_TEST(test_notvim_typing_in_insert_mode);
 	RUN_TEST(test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);

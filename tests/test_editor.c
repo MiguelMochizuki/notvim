@@ -2581,18 +2581,198 @@ static void test_editor_esc_at_column_0_sets_the_wanted_column(void) {
 	assert_cursor(0, 0);
 }
 
-/** @brief h, j, k, l and other keys do nothing in insert mode: no move, no redraw, no change of the text. */
-static void test_editor_hjkl_are_ignored_in_insert_mode(void) {
+/** @brief Send every byte of @p text to editor_handle_key() as a key (no letter is a command here: insert mode types). */
+static void type(const char *text) {
+	for (; *text; text++) editor_handle_key(&e, (unsigned char)*text);
+}
+
+/** @brief Start typing: one line @p line, insert mode, cursor at byte @p cx. */
+static void insert_at(const char *line, size_t cx) {
+	editor_free(&e); /* a test calls this more than once: the editor is freed in tearDown */
+	append(line);
+	press("i");
+	for (size_t i = 0; i < cx; i++) press("R");
+}
+
+/** @brief In insert mode h, j, k, l and every printable key are typed, not commands. */
+static void test_editor_hjkl_are_typed_in_insert_mode(void) {
+	insert_at("abc", 1);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'h'));
+	type("jkl");
+	assert_line(&e, 0, "ahjklbc");
+	assert_cursor(0, 5);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+}
+
+/** @brief Typing at the start, in the middle and at the end of a line; the cursor and wantcol follow (Vim: ixy then Esc leaves the cursor on y). */
+static void test_editor_typing_inserts_at_the_cursor(void) {
+	insert_at("abc", 0);
+	type("xy");
+	assert_line(&e, 0, "xyabc");
+	assert_cursor(0, 2);
+	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
+	insert_at("abc", 2);
+	type("Z");
+	assert_line(&e, 0, "abZc");
+	assert_cursor(0, 3);
+	insert_at("abc", 3);
+	type("XY");
+	assert_line(&e, 0, "abcXY");
+	assert_cursor(0, 5);
+	TEST_ASSERT_EQUAL_UINT(5, e.wantcol);
+	press("E");
+	assert_cursor(0, 4);
+}
+
+/** @brief Typing on an empty line, and on a line other than the first. */
+static void test_editor_typing_on_an_empty_line(void) {
+	editor_init(&e);
+	append("one");
+	append("");
+	press("ji");
+	type("hi");
+	assert_line(&e, 0, "one");
+	assert_line(&e, 1, "hi");
+	assert_cursor(1, 2);
+}
+
+/** @brief The first insertion into an editor with no lines creates the first line. */
+static void test_editor_typing_in_an_empty_editor(void) {
+	editor_init(&e);
+	press("i");
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'a'));
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	type("b");
+	assert_line(&e, 0, "ab");
+	assert_cursor(0, 2);
+	TEST_ASSERT_TRUE(e.modified);
+}
+
+/** @brief A complete multibyte character is inserted whole and the cursor moves past all its bytes; the keys before the last one ask for nothing. */
+static void test_editor_typing_a_multibyte_character(void) {
+	insert_at("ab", 1);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0xc3));
+	assert_line(&e, 0, "ab");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0xa9));
+	assert_line(&e, 0, "a\xc3\xa9" "b");
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
+	type("\xe2\x82\xac\xf0\x9f\x98\x80"); /* 3 and 4 bytes */
+	assert_line(&e, 0, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80" "b");
+	assert_cursor(0, 10);
+	TEST_ASSERT_EQUAL_UINT(4, e.wantcol);
+}
+
+/** @brief Stray continuation bytes, invalid leads and a character cut short are dropped, never inserted. */
+static void test_editor_typing_drops_invalid_bytes(void) {
+	insert_at("ab", 1);
+	type("\xa9\xff\xc0\xf5"); /* continuation, 0xff, overlong lead, too-high lead */
+	assert_line(&e, 0, "ab");
+	type("\xc3" "x"); /* lead cut short by an ASCII byte: only the x is typed */
+	assert_line(&e, 0, "axb");
+	type("\xe2\x82\xc3\xa9"); /* 3-byte lead cut short by a new lead: the e-acute is typed */
+	assert_line(&e, 0, "ax\xc3\xa9" "b");
+	type("\xe0\x80\x80"); /* overlong: complete but invalid */
+	assert_line(&e, 0, "ax\xc3\xa9" "b");
+	type("\xc3"); /* half a character, then Esc and a new insert: nothing leaks into the new one */
+	press("Ei");
+	type("\xa9");
+	assert_line(&e, 0, "ax\xc3\xa9" "b");
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+}
+
+/** @brief An arrow key between the two halves of a character drops the first half. */
+static void test_editor_an_arrow_drops_half_a_character(void) {
+	insert_at("ab", 0);
+	editor_handle_key(&e, 0xc3);
+	press("R");
+	editor_handle_key(&e, 0xa9);
+	assert_line(&e, 0, "ab");
+}
+
+/** @brief Tab inserts a tab character; the cursor column is the next tab stop. */
+static void test_editor_tab_inserts_a_tab(void) {
+	insert_at("ab", 1);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, '\t'));
+	assert_line(&e, 0, "a\tb");
+	assert_cursor(0, 2);
+	TEST_ASSERT_EQUAL_UINT(8, e.wantcol);
+}
+
+/** @brief Other control keys are ignored: no change, no redraw, not modified. */
+static void test_editor_control_keys_are_ignored_when_typing(void) {
+	insert_at("abc", 1);
+	const int ignored[] = { 0x01, 0x07, '\r', '\n', 0x08, 0x7f, 0x1f, 0x00 };
+	for (size_t i = 0; i < sizeof(ignored) / sizeof(*ignored); i++) TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, ignored[i]));
+	assert_line(&e, 0, "abc");
+	assert_cursor(0, 1);
+	TEST_ASSERT_FALSE(e.modified);
+}
+
+/** @brief A very long line grows by realloc and keeps its terminator. */
+static void test_editor_typing_a_very_long_line(void) {
+	insert_at("", 0);
+	for (size_t i = 0; i < 100000; i++) editor_handle_key(&e, 'a' + (int)(i % 26));
+	TEST_ASSERT_EQUAL_UINT(100000, strlen(editor_line(&e, 0)));
+	TEST_ASSERT_EQUAL_UINT(100000, e.cx);
+	TEST_ASSERT_EQUAL_CHAR('a' + (99999 % 26), editor_line(&e, 0)[99999]);
+	insert_at("end", 0);
+	for (size_t i = 0; i < 5000; i++) type("\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(10003, strlen(editor_line(&e, 0)));
+	TEST_ASSERT_EQUAL_STRING("end", editor_line(&e, 0) + 10000);
+}
+
+/** @brief modified is 0 after init, set by typing, not by moving or by normal mode keys, and cleared by a load. */
+static void test_editor_modified_is_set_by_typing_and_cleared_by_load(void) {
+	editor_init(&e);
+	TEST_ASSERT_FALSE(e.modified);
+	append("abc");
+	press("iRLE");
+	press("lh");
+	TEST_ASSERT_FALSE(e.modified);
+	press("ix");
+	TEST_ASSERT_TRUE(e.modified);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, "no-such-dir/none.txt"));
+	TEST_ASSERT_FALSE(e.modified);
+	editor_free(&e);
+	TEST_ASSERT_FALSE(e.modified);
+}
+
+/** @brief Typing leaves crlf alone. */
+static void test_editor_typing_keeps_the_crlf_flag(void) {
+	insert_at("abc", 0);
+	e.crlf = 1;
+	type("x");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	assert_line(&e, 0, "xabc");
+}
+
+/** @brief The status line shows [+] after the name once modified, and after [dos]; the position keeps the last column. */
+static void test_editor_status_shows_the_modified_mark(void) {
 	editor_init(&e);
 	append("abc");
-	append("def");
-	press("li");
-	const char *ignored = "hjklxiHJKL0 \n";
-	for (const char *k = ignored; *k; k++) TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, (unsigned char)*k));
-	assert_cursor(0, 1);
-	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
-	assert_line(&e, 0, "abc");
-	assert_line(&e, 1, "def");
+	e.modified = 1;
+	assert_status(30, "[No Name] [+] NORMAL" "       " "1,1");
+	e.crlf = 1;
+	assert_status(30, "[No Name] [dos] [+] NORMAL" " " "1,1");
+	e.crlf = 0;
+	assert_status(11, "[No Nam" " " "1,1"); /* the left part is cut first */
+	assert_status(3, "1,1");
+}
+
+/** @brief After typing, editor_scroll() keeps the cursor line in the window and the cursor stays after the new character. */
+static void test_editor_typing_at_the_bottom_of_a_window_scrolls(void) {
+	editor_init(&e);
+	for (int i = 0; i < 10; i++) append("line");
+	press("iDDDDDDDDD");
+	editor_scroll(&e, 4);
+	TEST_ASSERT_EQUAL_UINT(6, e.rowoff);
+	type("X");
+	editor_scroll(&e, 4);
+	TEST_ASSERT_EQUAL_UINT(6, e.rowoff);
+	assert_line(&e, 9, "Xline");
+	assert_cursor(9, 1);
 }
 
 /** @brief In normal mode h, j, k, l and the arrows move and ask for a redraw. */
@@ -3280,7 +3460,20 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_esc_on_an_empty_line);
 	RUN_TEST(test_editor_esc_steps_over_a_multibyte_character);
 	RUN_TEST(test_editor_esc_at_column_0_sets_the_wanted_column);
-	RUN_TEST(test_editor_hjkl_are_ignored_in_insert_mode);
+	RUN_TEST(test_editor_hjkl_are_typed_in_insert_mode);
+	RUN_TEST(test_editor_typing_inserts_at_the_cursor);
+	RUN_TEST(test_editor_typing_on_an_empty_line);
+	RUN_TEST(test_editor_typing_in_an_empty_editor);
+	RUN_TEST(test_editor_typing_a_multibyte_character);
+	RUN_TEST(test_editor_typing_drops_invalid_bytes);
+	RUN_TEST(test_editor_an_arrow_drops_half_a_character);
+	RUN_TEST(test_editor_tab_inserts_a_tab);
+	RUN_TEST(test_editor_control_keys_are_ignored_when_typing);
+	RUN_TEST(test_editor_typing_a_very_long_line);
+	RUN_TEST(test_editor_modified_is_set_by_typing_and_cleared_by_load);
+	RUN_TEST(test_editor_typing_keeps_the_crlf_flag);
+	RUN_TEST(test_editor_status_shows_the_modified_mark);
+	RUN_TEST(test_editor_typing_at_the_bottom_of_a_window_scrolls);
 	RUN_TEST(test_editor_hjkl_and_arrows_work_in_normal_mode);
 	RUN_TEST(test_editor_arrows_work_in_insert_mode);
 	RUN_TEST(test_editor_insert_right_reaches_the_end_of_the_line);

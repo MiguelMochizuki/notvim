@@ -28,6 +28,11 @@ typedef struct {
 	                     directly must set @c wantcol too. */
 	editor_mode_t mode; /**< Current mode; @ref EDITOR_MODE_NORMAL after init, free and load. In insert mode @c cx may equal the
 	                         length of the line (the cursor is after the last character); in normal mode it never does. */
+	int modified; /**< Non-zero once the text has been changed (typing); 0 after init, free and load. The status line shows
+	                   "[+]" while it is set. */
+	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode that is still incomplete; see @ref pend_len. */
+	size_t pend_len; /**< Number of bytes in @ref pend; 0 when no character is half typed. Reset by any key that is not a
+	                      continuation byte, and by leaving insert mode. */
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
 	                   0 for an LF, mixed or empty file, no file, or after an error. */
 	char *path;   /**< Owned copy of the path given to the last successful editor_load_file(), even if that file does not
@@ -155,7 +160,13 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * Normal mode: 'i' enters insert mode with the cursor where it is; the arrow keys and h/j/k/l move the cursor with
  * editor_move_cursor(); anything else does nothing. Insert mode: KEY_ESC leaves it, moving the cursor one character
  * left unless it is at column 0, as Vim does, and sets @c wantcol to the new column; only the arrow keys move the
- * cursor (h/j/k/l and every other key do nothing: typing comes later). KEY_ESC does nothing in normal mode.
+ * cursor. Every other key is typed: a printable ASCII byte or a Tab (as a tab character) is inserted at the cursor,
+ * and so is a UTF-8 character, but only once all its bytes have arrived (they come as consecutive keys; the first
+ * ones are kept in @c pend and the key returns 0). A stray or invalid byte, an incomplete character that is followed
+ * by a key that does not continue it, and every other control key are dropped. The first insertion into an editor
+ * with no lines creates its first line. After an insertion the cursor and @c wantcol are after the new character,
+ * @c modified is set and the key returns non-zero; the caller scrolls with editor_scroll(). A failed allocation drops
+ * the character and returns 0. KEY_ESC does nothing in normal mode.
  *
  * In insert mode editor_move_cursor() lets the cursor go one past the last character: right stops at the end of the
  * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
@@ -251,7 +262,8 @@ const char *editor_mode_label(const editor_t *e);
  * @brief Write the status line of @p e, as drawn, into @p out as a NUL-terminated string of exactly @p cols columns.
  *
  * Pure text, no escape sequences (editor_draw_screen() puts it in reverse video). The layout is
- * "<name> <mode>" (or "<name> [dos] <mode>" if @c crlf is set, a CRLF file that is kept as it is), then spaces, then "<line>,<col>" ending in the last column, where @c name is @c e->path ("[No Name]" if it is NULL
+ * "<name> <mode>" (or "<name> [dos] <mode>" if @c crlf is set, a CRLF file that is kept as it is; " [+]" follows the name
+ * and the [dos] when @c modified is set: "<name> [dos] [+] <mode>"), then spaces, then "<line>,<col>" ending in the last column, where @c name is @c e->path ("[No Name]" if it is NULL
  * or empty) and @c mode is editor_mode_label(). @c line is @c cy + 1 (1 for an editor with no lines) and
  * @c col is the display column of the cursor plus 1 (1 if @c cy is not a line), counted as the cursor is drawn (a tab or a mark counts from its
  * first column, a character or '?' is one column), not clipped to the width. The name goes through the same rules as
