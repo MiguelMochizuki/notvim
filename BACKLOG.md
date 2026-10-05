@@ -19,24 +19,18 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H5.1** As user, I want a status line with file name, mode and cursor position, so that I always know where I am and what the editor is doing
-  - Why first: insert mode (H3) is hard to use without seeing the mode, so the status line goes before it.
-  - The last terminal row becomes the status line; the text window is `rows - 1` (`editor_scroll`, `draw`, `editor_render` already take the row count). `main` uses the full terminal height today (a gap noted in H2.3).
-  - Content: file name (or `[No Name]`), mode label (`NORMAL` until H3.1), and `line,col` with the display column. Truncated to the terminal width without cutting a character.
-  - `editor_load_file` remembers the path in the editor (H4.1 needs it to save).
-  - A CRLF file shows `[dos]` after the file name (the `crlf` flag of H6.9), so a line-ending style is never a surprise on Linux, where LF is the norm.
-  - Known to check: the status row must not trigger the pending-wrap problem of H6.11 (a full-width status line has no `ESC[K`).
+- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+  - `Esc` is now recognised (H6.1): the decoder reports `KEY_ESC`.
+  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
+  - The status line (H5.1) shows the mode through `editor_mode_label()`, which returns `NORMAL` today: this story changes that one function.
 
 ## To do
 
-Order of work: H5.1, H3.1 to H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H3.1 to H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H3 Insert mode
 
-- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
-  - `Esc` is now recognised (H6.1): the decoder reports `KEY_ESC`.
-  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
 - **H3.2** As user, I want to type characters in insert mode and see them in the buffer
 - **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
 
@@ -225,6 +219,17 @@ Do these once insert mode and yank exist.
   - Known gaps:
     - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal: see H6.4 and H6.8.
     - The tests check the exact byte stream on a pty; what a real emulator shows was checked by hand.
+
+### H5 Interface
+
+- **H5.1** As user, I want a status line with file name, mode and cursor position, so that I always know where I am and what the editor is doing
+  - Design: the last row is the status line, in reverse video over the full width, with no `ESC[K`; `editor_status()` builds the text, `editor_draw_screen()` draws it after the erase of the unused rows.
+  - Design: `editor_t.path` is an owned copy kept even for a missing file (H4.1 saves to it); `editor_text_rows()` gives the window height `rows - 1`; `main` scrolls, draws and resizes with it.
+  - Design: the text is `<name> [dos] <mode>`, then `line,col` at the right (display column, not clipped); name through the same marks and UTF-8 rules as text; `[dos]` only for a CRLF file.
+  - Decisions: the position wins when truncating, then the name and `[dos]` and the mode label are cut from the right; a cut never splits a character or a mark. Mode label comes from `editor_mode_label()`.
+  - Decisions: `[dos]` follows the user decision of 2026-10-05: a CRLF file is kept as it is (detected, CR hidden, written back as CRLF); new and LF files stay LF; converting is `:set fileformat` (H10.6).
+  - Decisions: `editor_draw` (text only) stays beside `editor_draw_screen` (whole terminal); the status line is reserved before the rows when the buffer is short; one row has no status line.
+  - Known gaps: the name is cut on the right (Vim cuts it on the left); a name longer than the width hides the mode and `[dos]`; the cursor on a tab is drawn at its start (H6.4).
 
 ### H6 Robustness with real files and terminals
 
