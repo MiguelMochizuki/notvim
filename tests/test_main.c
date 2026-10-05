@@ -6,11 +6,13 @@
 #include "test_editor.h"
 #include "test_terminal.h"
 #include "test_notvim.h"
+#include "test_tmpdir.h"
+#include "tmpdir.h"
 
-/** @brief Unity hook run before each test; nothing to prepare. */
-void setUp(void) {}
-/** @brief Unity hook run after each test; nothing to clean up. */
-void tearDown(void) {}
+/** @brief Unity hook run before each test; creates the temporary directory. */
+void setUp(void) { tmpdir_create(); }
+/** @brief Unity hook run after each test, even a failed one; removes the temporary directory. */
+void tearDown(void) { tmpdir_destroy(); }
 
 /** @brief Run all suites. @return Number of failed tests (0 on success). */
 int main(void) {
@@ -18,5 +20,6 @@ int main(void) {
 	test_editor_suite();
 	test_terminal_suite();
 	test_notvim_suite();
+	test_tmpdir_suite();
 	return UNITY_END();
 }
