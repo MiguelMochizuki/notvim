@@ -27,8 +27,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | Redrawing without flicker, and complete writes |
-| Robustness | The limitations below, in order of harm (epic H6) |
+| In progress | Nothing: the robustness epic (H6) is finished |
 | Editing | Insert mode, typing characters, `Backspace` and `Enter` |
 | Navigation | Scrolling long lines horizontally |
 | Files | Saving with `:w`, quitting with `:q` and `:q!` |
@@ -36,7 +35,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 ## Known limitations
 
-These are being fixed before new features (see epic H6 in [BACKLOG.md](BACKLOG.md)). Until then:
+The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 
 - A file with mixed line endings (some CRLF, some LF) shows `^M` on its CRLF lines. Saving is not built yet and will have to keep the style of the file.
 - Double-width (CJK) and combining characters take one column each. Invalid UTF-8 and C1 controls are shown as `?`.
