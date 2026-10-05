@@ -15,9 +15,10 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
-  - Reproduced: after `SIGTERM` the switch back from the alternate screen is never written.
-  - The handler only sets a flag and the main loop does the cleanup, as in H0.7. A crash or `SIGKILL` stays out of reach.
+- **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
+  - Reproduced: after the terminal shrinks to 8 rows, notvim still draws 24.
+  - The draw buffer must be reallocated for the new size.
+  - Idea: the signal pipe of H6.6 (`stopsig`) is the model: a handler that writes one byte, polled together with stdin. `SIGWINCH` is not a stop signal, so it needs its own pipe or a more general module.
 
 ## To do
 
@@ -26,9 +27,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
-  - Reproduced: after the terminal shrinks to 8 rows, notvim still draws 24.
-  - The draw buffer must be reallocated for the new size.
 - **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
   - Reproduced: clipping a 201-byte line to 80 bytes gives invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
   - Out of scope: double-width (CJK) and combining characters.
@@ -201,3 +199,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - `main` checks `isatty` on stdin, then stdout, before anything else: it prints `notvim: input is not a terminal` or `notvim: output is not a terminal` on stderr and exits 1. The messages are like Vim's.
   - The tests start `notvim` with explicit descriptors (`/dev/null`, a pipe, a pty slave) and check the message, the exit status and that nothing at all reaches the redirected stdout.
   - Known gap: stderr is not checked, so `notvim file 2>/dev/null` still starts; only the two streams the editor uses are.
+- **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
+  - Reproduced: after `SIGTERM` the switch back from the alternate screen was never written.
+  - Design: a new module `stopsig` installs handlers for `SIGINT`, `SIGTERM` and `SIGHUP` that only record the signal and write one byte to a pipe (async-signal-safe). `main` polls that pipe together with stdin, which avoids the race of a plain flag: a signal arriving just before the wait would be missed until the next key.
+  - A signal ends the loop and `main` returns through the normal exit, so the alternate screen and the tty modes are restored. The exit status is 128 plus the signal number, as shells report it (143, 129, 130).
+  - `SIGINT` matters although `Ctrl+C` is only a byte in raw mode: `kill -INT` still delivers it. `stopsig_remove` restores the previous handlers, because the test runner's own temporary-directory handlers (H0.7) use the same signals.
+  - Known gaps: a signal during file loading uses the default action, which is safe because nothing has been changed yet. A crash or `SIGKILL` still leaves the terminal as it is. `SIGTSTP` and `SIGQUIT` are not handled (`Ctrl+Z` and `Ctrl+\` are bytes in raw mode).
