@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include "editor.h"
 #include "keys.h"
+#include "stopsig.h"
 #include "terminal.h"
 
 /** @brief atexit() handler: switch back from the alternate screen, then restore the tty modes. */
@@ -53,8 +54,11 @@ static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size
  * screen start, so a load error is printed on the normal terminal. The arrow keys and h/j/k/l move the
  * cursor and the screen is redrawn after each move.
  *
+ * SIGINT, SIGTERM and SIGHUP end the editor through the normal exit, so the
+ * alternate screen and the tty modes are restored.
+ *
  * @return 0 on normal exit, 1 if stdin or stdout is not a terminal or the
- *         file can't be loaded.
+ *         file can't be loaded, 128 plus the signal number after a signal.
  */
 int main(int argc, char **argv) {
 	if (!isatty(STDIN_FILENO)) {
@@ -72,6 +76,13 @@ int main(int argc, char **argv) {
 	if (argc > 1 && editor_load_file(&e, argv[1]) < 0) {
 		const char *reason = errno == EILSEQ ? "binary file (contains NUL bytes)" : strerror(errno);
 		fprintf(stderr, "notvim: %s: %s\n", argv[1], reason);
+		return 1;
+	}
+
+	/* before the terminal changes, so a signal can never arrive unhandled afterwards */
+	int sigfd = stopsig_install();
+	if (sigfd < 0) {
+		fprintf(stderr, "notvim: cannot catch signals: %s\n", strerror(errno));
 		return 1;
 	}
 
@@ -94,14 +105,19 @@ int main(int argc, char **argv) {
 	key_parser_init(&parser);
 	for (;;) {
 		/* inside an escape sequence wait only a moment: a lone Esc has nothing after it */
-		struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
-		int ready = poll(&pfd, 1, key_parser_pending(&parser) ? KEY_ESC_TIMEOUT_MS : -1);
+		struct pollfd pfds[2] = {
+			{ .fd = STDIN_FILENO, .events = POLLIN },
+			{ .fd = sigfd, .events = POLLIN },
+		};
+		int ready = poll(pfds, 2, key_parser_pending(&parser) ? KEY_ESC_TIMEOUT_MS : -1);
 		int key;
 		if (ready == 0) {
 			key = key_parser_timeout(&parser);
 		} else if (ready < 0) {
 			if (errno == EINTR) continue;
 			break;
+		} else if (pfds[1].revents & POLLIN) {
+			break; /* SIGINT, SIGTERM or SIGHUP: leave through the normal exit so the terminal is restored */
 		} else {
 			char c;
 			if (read(STDIN_FILENO, &c, 1) != 1) break;
@@ -117,7 +133,8 @@ int main(int argc, char **argv) {
 		}
 	}
 
+	int sig = stopsig_received();
 	free(out);
 	editor_free(&e);
-	return 0;
+	return sig ? 128 + sig : 0;
 }

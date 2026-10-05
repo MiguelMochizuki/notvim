@@ -576,6 +576,41 @@ static void test_notvim_refuses_when_output_is_not_a_terminal(void) {
 	TEST_ASSERT_EQUAL_UINT(0, written);
 }
 
+/**
+ * @brief Send @p sig to a running notvim and check that it restores the terminal and exits with 128 + @p sig.
+ */
+static void assert_restores_the_terminal_on_signal(int sig) {
+	const char *path = tmpdir_write("signal.txt", "abc\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], last[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	kill(pid, sig);
+	read_output(master, last, sizeof(last));
+	int status = wait_exit(pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_STRING(ALT_LEAVE, last);
+	TEST_ASSERT_EQUAL_INT(128 + sig, status);
+}
+
+/** @brief SIGTERM switches back from the alternate screen and exits with 143. */
+static void test_notvim_restores_the_terminal_on_sigterm(void) {
+	assert_restores_the_terminal_on_signal(SIGTERM);
+}
+
+/** @brief SIGHUP, as sent when the terminal closes, does the same and exits with 129. */
+static void test_notvim_restores_the_terminal_on_sighup(void) {
+	assert_restores_the_terminal_on_signal(SIGHUP);
+}
+
+/** @brief SIGINT sent by kill (Ctrl+C is only a byte in raw mode) does the same and exits with 130. */
+static void test_notvim_restores_the_terminal_on_sigint(void) {
+	assert_restores_the_terminal_on_signal(SIGINT);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -611,6 +646,9 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_tabs_do_not_overflow_the_screen);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
+	RUN_TEST(test_notvim_restores_the_terminal_on_sigterm);
+	RUN_TEST(test_notvim_restores_the_terminal_on_sighup);
+	RUN_TEST(test_notvim_restores_the_terminal_on_sigint);
 	RUN_TEST(test_notvim_refuses_a_binary_file);
 	RUN_TEST(test_notvim_refuses_when_input_is_not_a_terminal);
 	RUN_TEST(test_notvim_refuses_when_output_is_not_a_terminal);
