@@ -1232,6 +1232,31 @@ static void test_notvim_redraw_survives_a_non_blocking_stdout_and_a_slow_reader(
 	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 300, 300, 200, 0, 1, 200);
 }
 
+/** @brief When the terminal can no longer be written to, a redraw in the loop makes notvim exit with status 1 (as a failed first draw does), not 0. */
+static void test_notvim_exits_1_when_a_redraw_fails(void) {
+	const char *path = tmpdir_write("gone.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int out_master, out_slave, in_master, in_slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&out_master, &out_slave, NULL, NULL, NULL));
+	TEST_ASSERT_EQUAL_INT(0, openpty(&in_master, &in_slave, NULL, NULL, NULL));
+	/* keys come from one pty, the screen goes to another whose master we then close: its writes fail with EIO */
+	int all[4] = { out_master, out_slave, in_master, in_slave };
+	for (int i = 0; i < 4; i++) fcntl(all[i], F_SETFD, FD_CLOEXEC); /* the child must not keep a master open */
+	pid_t pid = spawn_notvim_fds(path, in_slave, out_slave, out_slave);
+	int raw = wait_until_raw(in_master);
+	char first[2048];
+	read_output(out_master, first, sizeof(first));
+	close(out_master);
+	close(out_slave);
+	close(in_slave);
+	ssize_t sent = write(in_master, "j", 1);
+	int status = wait_exit(pid);
+	close(in_master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(1, (int)sent);
+	TEST_ASSERT_EQUAL_INT(1, status);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -1300,6 +1325,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_short_wide_screen_of_four_byte_text_is_complete);
 	RUN_TEST(test_notvim_resize_to_a_short_wide_screen_of_four_byte_text_is_complete);
 	RUN_TEST(test_notvim_redraw_survives_a_non_blocking_stdout_and_a_slow_reader);
+	RUN_TEST(test_notvim_exits_1_when_a_redraw_fails);
 	RUN_TEST(test_notvim_remembers_the_column_over_uneven_lines);
 	RUN_TEST(test_notvim_remembers_the_column_across_a_scroll);
 }

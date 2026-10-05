@@ -92,8 +92,9 @@ static int screen_draw(const screen_t *s, const editor_t *e) {
  * SIGINT, SIGTERM and SIGHUP end the editor through the normal exit, so the
  * alternate screen and the tty modes are restored.
  *
- * @return 0 on normal exit, 1 if stdin or stdout is not a terminal or the
- *         file can't be loaded, 128 plus the signal number after a signal.
+ * @return 0 on normal exit, 1 if stdin or stdout is not a terminal, the
+ *         file can't be loaded or the screen can't be written to (at startup
+ *         or later), 128 plus the signal number after a signal.
  */
 int main(int argc, char **argv) {
 	if (!isatty(STDIN_FILENO)) {
@@ -124,7 +125,7 @@ int main(int argc, char **argv) {
 	/* same reason: a resize right after raw mode starts must not be lost */
 	int winchfd = winch_install();
 	if (winchfd < 0) {
-		fprintf(stderr, "notvim: cannot catch signals: %s\n", strerror(errno));
+		fprintf(stderr, "notvim: cannot catch resizes: %s\n", strerror(errno));
 		return 1;
 	}
 
@@ -143,6 +144,7 @@ int main(int argc, char **argv) {
 		return 1; /* the terminal is gone: leave through the normal exit, which restores what it can */
 	}
 
+	int write_failed = 0;
 	key_parser_t parser;
 	key_parser_init(&parser);
 	for (;;) {
@@ -165,7 +167,10 @@ int main(int argc, char **argv) {
 			winch_drain();
 			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
 			editor_scroll(&e, (size_t)screen.rows);
-			if (screen_draw(&screen, &e) < 0) break;
+			if (screen_draw(&screen, &e) < 0) {
+				write_failed = 1;
+				break;
+			}
 			continue; /* a pending escape sequence stays pending */
 		} else {
 			char c;
@@ -178,12 +183,15 @@ int main(int argc, char **argv) {
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
 			editor_scroll(&e, (size_t)screen.rows);
-			if (screen_draw(&screen, &e) < 0) break;
+			if (screen_draw(&screen, &e) < 0) {
+				write_failed = 1;
+				break;
+			}
 		}
 	}
 
 	int sig = stopsig_received();
 	free(screen.buf);
 	editor_free(&e);
-	return sig ? 128 + sig : 0;
+	return write_failed ? 1 : sig ? 128 + sig : 0;
 }

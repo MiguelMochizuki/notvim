@@ -236,8 +236,6 @@ int editor_load_file(editor_t *e, const char *path) {
 	return rc;
 }
 
-/** Upper bound for the cursor sequence "ESC [ row ; col H" with two 20-digit numbers. */
-#define CURSOR_SEQ_MAX 44
 /** Hide the cursor and move home: the start of every draw. */
 #define HIDE_HOME "\x1b[?25l\x1b[H"
 /** Length of HIDE_HOME. */
@@ -264,10 +262,10 @@ size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *ou
 		put_line(line, max_cols, out, &pos, rows_end);
 		if (width < max_cols) put(out, &pos, rows_end, "\x1b[K", 3); /* not after the last column: the cursor is still on it */
 	}
-	if (drawn < max_rows) pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;1H\x1b[J", drawn + 1);
+	if (drawn < max_rows) pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;1H\x1b[J", drawn + 1);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
 	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
 	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
-	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH\x1b[?25h", row + 1, col + 1);
+	pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;%zuH\x1b[?25h", row + 1, col + 1);
 	return pos;
 }
