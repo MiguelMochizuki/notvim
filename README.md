@@ -5,7 +5,7 @@ A (not-)Vim reimplementation in C for UNIX/Linux for educational purposes. Built
 
 ## Status
 
-Early development: notvim opens a file, shows it, lets you move around and type text into it. There is no saving yet, so changes are lost on quit.
+Early development: notvim opens a file, shows it, lets you move around, type text into it and save it with `:w`. `:q` is not built yet: leave with `Ctrl+Q`, which does not ask about unsaved changes.
 
 What works today:
 
@@ -27,7 +27,8 @@ Keys:
 | `Backspace` | In insert mode: delete the character before the cursor; at the start of a line, join it to the previous one |
 | `Delete` | In insert mode: delete the character under the cursor; at the end of a line, join the next one |
 | `Esc` | Leave insert mode, one character left unless at column 0 |
-| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. No command works yet: each shows `E492` |
+| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. `:w`, `:w!` and `:w name` save (see below); any other command shows `E492` |
+| `:w` `:w!` `:w name` | Save to the file, or to `name` (which becomes the file if there is none): `"name" [New] 12L, 345B written`, or `E32: No file name`. The write is atomic (temporary file, `fsync`, `rename`) and keeps the permission bits; a missing final newline is added, as in Vim |
 | `Ctrl+Q` | Quit |
 
 The last row is the status line, or the command line, or a message such as an error (until the next key): `name [dos] [+] NORMAL` on the left, `line,col` (display column) on the right. On a narrow terminal the position stays and the rest is cut from the right (mode first).
@@ -38,9 +39,8 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete` |
-| In progress | saving with `:w` (the `:` command line is built, the commands are not yet) |
-| Editing core | quitting with `:q` and `:q!` |
+| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w` |
+| In progress | quitting with `:q` and `:q!` |
 | Navigation | Scrolling long lines horizontally; double-width characters |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
@@ -51,15 +51,16 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 
-- A file with mixed line endings (some CRLF, some LF) shows `^M` on its CRLF lines. Saving is not built yet and will have to keep the style of the file.
+- A file with mixed line endings (some CRLF, some LF) shows `^M` on its CRLF lines. `:w` writes such a file back unchanged.
 - Double-width (CJK, emoji) and combining characters take one column each in notvim, but the terminal draws wide ones in two. A long line of them wraps onto the next row, pushes the rows below down and can scroll the screen; the cursor column is off too (planned as H6.12).
-- Invalid UTF-8 and C1 controls are shown as `?`.
+- Invalid UTF-8 and C1 controls are shown as `?` (saved as they were).
+- `:w` loses hard links (the rename makes a new file), does not `fsync` the directory, keeps no backup file and does not keep the owner and group.
 
 ## Line endings
 
 Linux is LF, and so is this repository (`.gitattributes`, `.editorconfig` and `make check-eol`, which `make test` runs first).
 notvim never adds a carriage return to an LF file or to a new file. A file that uses CRLF throughout is recognised (shown as `[dos]` in the status line)
-and is written back as it was. Converting on purpose (`:set fileformat=unix`) is planned as H10.6.
+and is written back as it was by `:w`; an LF file, a new file and an empty editor are written with LF only, and a lone `\r` inside a line is kept as data. Converting on purpose (`:set fileformat=unix`) is planned as H10.6.
 
 ## Build
 
