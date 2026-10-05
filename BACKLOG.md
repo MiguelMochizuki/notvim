@@ -23,7 +23,17 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
-All of them are done (see Done below): this epic is finished.
+H6.1 to H6.11 are done (see Done below). H6.12 was found by the final review of the epic.
+
+- **H6.12** As user, I want double-width (CJK, emoji) and combining characters to take the right number of columns
+  - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
+    notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
+    The drawn cursor column and `ESC[K` land in the wrong place too.
+  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
+    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
+  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
+  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
+    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
 
 
 ### H0 Development foundations
@@ -208,7 +218,7 @@ All of them are done (see Done below): this epic is finished.
   - `draw_buffer_size()` now allows 4 bytes per column (`rows * (cols * 4 + 2) + EDITOR_DRAW_OVERHEAD`), tested end to end with 2, 3 and 4-byte characters, at startup and on a resize.
   - Decisions: each invalid byte is its own `?` (a truncated euro sign is `??`). A C1 control (U+0080 to U+009F, some terminals act on them) is one cell of two bytes drawn as one `?`.
   - A vertical move that lands inside a character snaps back to its start; a clamp goes to the start of the last character. `cx` stays a byte index.
-  - Known gaps: double-width (CJK) and combining characters take one column each. `cx` is a byte index, which made the cursor drift left on multi-byte lines: closed by H6.10 (remembered display column).
+  - Known gaps: double-width (CJK, emoji) and combining characters take one column each, which garbles the screen for such text (H6.12). `cx` is a byte index, which made the cursor drift left on multi-byte lines: closed by H6.10 (remembered display column).
   - Known gaps: the mutant "Left steps one byte" survives because the snap puts the cursor back on the character start (equivalent). Invalid UTF-8 is shown as `?`, so saving (H4.1) must keep the original bytes.
 - **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
   - Reproduced: `abc\r\ndef\r\n` was drawn as `abc\r\r\ndef\r`.

@@ -12,7 +12,7 @@ What works today:
 - Opening a file given on the command line and showing its lines, up to the terminal height
 - Moving the cursor and scrolling vertically when it leaves the screen
 - Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit
-- Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen
+- Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen (except double-width characters, see Known limitations)
 
 Keys:
 
@@ -38,7 +38,8 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 
 - A file with mixed line endings (some CRLF, some LF) shows `^M` on its CRLF lines. Saving is not built yet and will have to keep the style of the file.
-- Double-width (CJK) and combining characters take one column each. Invalid UTF-8 and C1 controls are shown as `?`.
+- Double-width (CJK, emoji) and combining characters take one column each in notvim, but the terminal draws wide ones in two. A long line of them wraps onto the next row, pushes the rows below down and can scroll the screen; the cursor column is off too (planned as H6.12).
+- Invalid UTF-8 and C1 controls are shown as `?`.
 
 ## Build
 
