@@ -47,13 +47,25 @@ static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size
 /**
  * @brief Run the editor until Ctrl+Q is pressed or stdin closes.
  *
- * Usage: notvim [file]. The file is loaded before raw mode and the alternate
+ * Usage: notvim [file]. It refuses to run unless stdin and stdout are
+ * terminals, so that it never writes escape sequences into a pipe or a file.
+ * The file is loaded before raw mode and the alternate
  * screen start, so a load error is printed on the normal terminal. The arrow keys and h/j/k/l move the
  * cursor and the screen is redrawn after each move.
  *
- * @return 0 on normal exit, 1 if the file can't be loaded.
+ * @return 0 on normal exit, 1 if stdin or stdout is not a terminal or the
+ *         file can't be loaded.
  */
 int main(int argc, char **argv) {
+	if (!isatty(STDIN_FILENO)) {
+		fprintf(stderr, "notvim: input is not a terminal\n");
+		return 1;
+	}
+	if (!isatty(STDOUT_FILENO)) {
+		fprintf(stderr, "notvim: output is not a terminal\n");
+		return 1;
+	}
+
 	editor_t e;
 	editor_init(&e);
 

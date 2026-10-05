@@ -4,6 +4,7 @@
  */
 #define _DEFAULT_SOURCE /* usleep, kill under -std=c11 */
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <poll.h>
 #include <pty.h>
@@ -33,6 +34,33 @@ static pid_t spawn_notvim(const char *file, unsigned short rows, int *master) {
 		_exit(127);
 	}
 	return pid;
+}
+
+/**
+ * @brief Start ./notvim with the given descriptors as stdin, stdout and stderr.
+ * @param file   Argument for notvim.
+ * @param in_fd  Descriptor to use as stdin.
+ * @param out_fd Descriptor to use as stdout.
+ * @param err_fd Descriptor to use as stderr.
+ * @return The child's pid.
+ */
+static pid_t spawn_notvim_fds(const char *file, int in_fd, int out_fd, int err_fd) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		dup2(in_fd, STDIN_FILENO);
+		dup2(out_fd, STDOUT_FILENO);
+		dup2(err_fd, STDERR_FILENO);
+		execl("./notvim", "./notvim", file, (char *)NULL);
+		_exit(127);
+	}
+	return pid;
+}
+
+/** @brief Make both ends of a pipe close on exec, so a child does not keep them open. */
+static void pipe_cloexec(int fds[2]) {
+	TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+	fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+	fcntl(fds[1], F_SETFD, FD_CLOEXEC);
 }
 
 /** @brief Wait up to ~2s for the terminal on @p master to enter raw mode; 1 if it did. */
@@ -507,6 +535,47 @@ static void test_notvim_refuses_a_binary_file(void) {
 	TEST_ASSERT_NULL(strstr(out, "\x1b[?1049"));
 }
 
+/** @brief With stdin not a terminal, notvim refuses to start, says so, and writes nothing to the terminal. */
+static void test_notvim_refuses_when_input_is_not_a_terminal(void) {
+	const char *path = tmpdir_write("plain.txt", "hello\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master, slave, err[2];
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	pipe_cloexec(err);
+	int devnull = open("/dev/null", O_RDONLY);
+	TEST_ASSERT_TRUE(devnull >= 0);
+	pid_t pid = spawn_notvim_fds(path, devnull, slave, err[1]);
+	close(err[1]);
+	char message[256], terminal[256];
+	read_output(err[0], message, sizeof(message));
+	size_t written = read_output(master, terminal, sizeof(terminal));
+	int status = wait_exit(pid);
+	close(err[0]); close(master); close(slave); close(devnull);
+	TEST_ASSERT_EQUAL_INT(1, status);
+	TEST_ASSERT_EQUAL_STRING("notvim: input is not a terminal\n", message);
+	TEST_ASSERT_EQUAL_UINT(0, written);
+}
+
+/** @brief With stdout not a terminal, notvim refuses to start and writes nothing into the pipe. */
+static void test_notvim_refuses_when_output_is_not_a_terminal(void) {
+	const char *path = tmpdir_write("plain.txt", "hello\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master, slave, out[2], err[2];
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	pipe_cloexec(out);
+	pipe_cloexec(err);
+	pid_t pid = spawn_notvim_fds(path, slave, out[1], err[1]);
+	close(out[1]); close(err[1]);
+	char piped[256], message[256];
+	size_t written = read_output(out[0], piped, sizeof(piped));
+	read_output(err[0], message, sizeof(message));
+	int status = wait_exit(pid);
+	close(out[0]); close(err[0]); close(master); close(slave);
+	TEST_ASSERT_EQUAL_INT(1, status);
+	TEST_ASSERT_EQUAL_STRING("notvim: output is not a terminal\n", message);
+	TEST_ASSERT_EQUAL_UINT(0, written);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -543,5 +612,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
 	RUN_TEST(test_notvim_refuses_a_binary_file);
+	RUN_TEST(test_notvim_refuses_when_input_is_not_a_terminal);
+	RUN_TEST(test_notvim_refuses_when_output_is_not_a_terminal);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
 }
