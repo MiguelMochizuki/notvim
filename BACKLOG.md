@@ -25,6 +25,10 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - Loading never truncates, so saving a long file must write every line (H0.8).
   - Linux default: a new file and any file that is not CRLF are saved with LF only, a CR is never added; only a file loaded as CRLF is written back with CRLF. Never convert silently.
   - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
+  - Done so far, the command line: `:` in normal mode opens `EDITOR_MODE_COMMAND`; the text is a bounded `cmdline_t` (256 bytes), `cmd_parse()` splits name, `!` and argument. No command has behaviour yet.
+  - Design: a message (`editor_set_message()`, owned) replaces the status line in plain video until the next key; `editor_bottom_line()` gives the row: command line, else message, else status.
+  - Decisions: Backspace on an empty command line and Esc cancel, as Vim does (checked); `:` in insert mode types a colon; Ctrl+Q quits in every mode; every non-empty command shows `E492: Not an editor command: <text>` for now.
+  - Known gaps: a command line wider than the terminal is cut on the right, the cursor on the last column (Vim scrolls it); no history, no editing inside the line, Tab is ignored; the message is one row.
 
 ## To do
 
