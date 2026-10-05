@@ -12,6 +12,7 @@
 #include "keys.h"
 #include "stopsig.h"
 #include "terminal.h"
+#include "winch.h"
 
 /** @brief atexit() handler: switch back from the alternate screen, then restore the tty modes. */
 static void cleanup(void) {
@@ -39,6 +40,12 @@ static int key_to_move(int key, editor_move_t *dir) {
 	}
 }
 
+/** @brief Size in bytes of the draw buffer for a terminal of @p rows by @p cols. */
+static size_t draw_buffer_size(int rows, int cols) {
+	/* each of the rows lines is clipped to cols bytes, plus "\r\n" between them */
+	return (size_t)rows * ((size_t)cols + 2) + EDITOR_DRAW_OVERHEAD;
+}
+
 /** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes. */
 static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size) {
 	size_t n = editor_draw(e, (size_t)rows, (size_t)cols, out, size);
@@ -53,6 +60,9 @@ static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size
  * The file is loaded before raw mode and the alternate
  * screen start, so a load error is printed on the normal terminal. The arrow keys and h/j/k/l move the
  * cursor and the screen is redrawn after each move.
+ *
+ * SIGWINCH makes it read the terminal size again, resize the draw buffer, scroll
+ * so the cursor stays visible and redraw. If the buffer cannot grow, the old size is kept.
  *
  * SIGINT, SIGTERM and SIGHUP end the editor through the normal exit, so the
  * alternate screen and the tty modes are restored.
@@ -86,14 +96,20 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
+	/* same reason: a resize right after raw mode starts must not be lost */
+	int winchfd = winch_install();
+	if (winchfd < 0) {
+		fprintf(stderr, "notvim: cannot catch signals: %s\n", strerror(errno));
+		return 1;
+	}
+
 	terminal_enter_raw(STDIN_FILENO);
 	terminal_enter_alt_screen(STDOUT_FILENO);
 	atexit(cleanup);
 
 	int rows, cols;
 	terminal_get_size(STDOUT_FILENO, &rows, &cols);
-	/* each of the rows lines is clipped to cols bytes, plus "\r\n" between them */
-	size_t size = (size_t)rows * ((size_t)cols + 2) + EDITOR_DRAW_OVERHEAD;
+	size_t size = draw_buffer_size(rows, cols);
 	char *out = malloc(size);
 	if (!out) {
 		fprintf(stderr, "notvim: %s\n", strerror(ENOMEM));
@@ -105,11 +121,12 @@ int main(int argc, char **argv) {
 	key_parser_init(&parser);
 	for (;;) {
 		/* inside an escape sequence wait only a moment: a lone Esc has nothing after it */
-		struct pollfd pfds[2] = {
+		struct pollfd pfds[3] = {
 			{ .fd = STDIN_FILENO, .events = POLLIN },
 			{ .fd = sigfd, .events = POLLIN },
+			{ .fd = winchfd, .events = POLLIN },
 		};
-		int ready = poll(pfds, 2, key_parser_pending(&parser) ? KEY_ESC_TIMEOUT_MS : -1);
+		int ready = poll(pfds, 3, key_parser_pending(&parser) ? KEY_ESC_TIMEOUT_MS : -1);
 		int key;
 		if (ready == 0) {
 			key = key_parser_timeout(&parser);
@@ -118,6 +135,20 @@ int main(int argc, char **argv) {
 			break;
 		} else if (pfds[1].revents & POLLIN) {
 			break; /* SIGINT, SIGTERM or SIGHUP: leave through the normal exit so the terminal is restored */
+		} else if (pfds[2].revents & POLLIN) {
+			winch_drain();
+			int new_rows, new_cols;
+			terminal_get_size(STDOUT_FILENO, &new_rows, &new_cols);
+			size_t new_size = draw_buffer_size(new_rows, new_cols);
+			char *grown = realloc(out, new_size);
+			if (!grown) continue; /* keep the old size and buffer: they still match each other */
+			out = grown;
+			size = new_size;
+			rows = new_rows;
+			cols = new_cols;
+			editor_scroll(&e, (size_t)rows);
+			redraw(&e, rows, cols, out, size);
+			continue; /* a pending escape sequence stays pending */
 		} else {
 			char c;
 			if (read(STDIN_FILENO, &c, 1) != 1) break;

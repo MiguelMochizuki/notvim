@@ -129,6 +129,43 @@ static size_t send_and_read(int master, const char *keys, char *out, size_t size
 	return read_output(master, out, size);
 }
 
+/** @brief Set the pty size; the kernel then sends SIGWINCH to the child. */
+static void set_size(int master, unsigned short rows, unsigned short cols) {
+	struct winsize ws = { .ws_row = rows, .ws_col = cols };
+	ioctl(master, TIOCSWINSZ, &ws);
+}
+
+/**
+ * @brief Write the lines of the 30-line resize file, numbered from 1 (two digits, then 'x' up to 40 bytes).
+ * @param content Receives the file content.
+ * @param size    Size of @p content.
+ */
+static void resize_file_content(char *content, size_t size) {
+	content[0] = '\0';
+	for (int i = 1; i <= 30; i++) {
+		char line[64];
+		snprintf(line, sizeof(line), "%02dxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n", i);
+		strncat(content, line, size - strlen(content) - 1);
+	}
+}
+
+/**
+ * @brief Write the screen for lines @p first to @p last of the resize file, clipped to @p cols columns.
+ * @param row Cursor row on the screen (1-based); the cursor is in column 1.
+ * @note @p cols must be at most 40, the width of a line of the resize file.
+ */
+static void resize_screen(char *buf, size_t size, int first, int last, int cols, int row) {
+	char text[2048] = "";
+	for (int i = first; i <= last; i++) {
+		char line[64];
+		snprintf(line, sizeof(line), "%02dxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", i);
+		line[cols] = '\0';
+		if (i > first) strcat(text, "\r\n");
+		strcat(text, line);
+	}
+	screen(buf, size, text, row, 1);
+}
+
 /** @brief With no argument, notvim enters raw mode and quits on Ctrl+Q with status 0. */
 static void test_notvim_binary_enters_raw_and_quits_on_ctrl_q(void) {
 	int master;
@@ -611,6 +648,203 @@ static void test_notvim_restores_the_terminal_on_sigint(void) {
 	assert_restores_the_terminal_on_signal(SIGINT);
 }
 
+/** @brief Shrinking the terminal to 5 rows by 30 columns redraws for the new size. */
+static void test_notvim_redraws_for_the_new_size_after_a_shrink(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 5, 30);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	resize_screen(expected, sizeof(expected), 1, 5, 30, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief Shrinking below the cursor row scrolls the window so the cursor stays visible. */
+static void test_notvim_scrolls_to_keep_the_cursor_visible_after_a_shrink(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], moved[16384], after[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	/* ten redraws of about 1 KB: the buffer holds them all, so none is left to be read as "after" */
+	size_t n = send_and_read(master, "jjjjjjjjjj", moved, sizeof(moved));
+	set_size(master, 5, 80);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_TRUE(n >= 7);
+	TEST_ASSERT_EQUAL_STRING("\x1b[11;1H", moved + n - 7); /* the cursor was on line 11 before the resize */
+	resize_screen(expected, sizeof(expected), 7, 11, 40, 5); /* lines 7 to 11, cursor on the last row */
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief Growing the terminal shows more rows. */
+static void test_notvim_shows_more_rows_after_the_terminal_grows(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 5, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 8, 80);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	resize_screen(expected, sizeof(expected), 1, 8, 40, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief After a burst of resizes the last size wins: the output ends with the redraw for it. */
+static void test_notvim_last_size_wins_after_a_burst_of_resizes(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[8192], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 10, 80);
+	set_size(master, 7, 80);
+	set_size(master, 4, 80);
+	size_t n = read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	resize_screen(expected, sizeof(expected), 1, 4, 40, 1);
+	size_t len = strlen(expected);
+	TEST_ASSERT_TRUE(n >= len);
+	TEST_ASSERT_EQUAL_STRING(expected, after + n - len);
+}
+
+/** @brief Growing from 2 rows to 8 shows full-width lines: the draw buffer is reallocated for the new size. */
+static void test_notvim_draw_buffer_grows_with_the_terminal(void) {
+	char content[4096] = "";
+	for (int i = 1; i <= 30; i++) {
+		char line[128];
+		snprintf(line, sizeof(line), "%02dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy\n", i);
+		strcat(content, line);
+	}
+	const char *path = tmpdir_write("wide-grow.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[4096], expected[4096], text[4096] = "";
+	pid_t pid = spawn_notvim(path, 2, &master); /* a buffer for 2 rows only */
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 8, 80);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	for (int i = 1; i <= 8; i++) {
+		char line[128];
+		snprintf(line, sizeof(line), "%02dyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy", i);
+		line[80] = '\0';
+		if (i > 1) strcat(text, "\r\n");
+		strcat(text, line);
+	}
+	screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief Resizing to a tall, narrow terminal fits the buffer: it needs rows * (cols + 2), not cols * (rows + 2). */
+static void test_notvim_draw_buffer_fits_a_tall_narrow_terminal(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[4096], expected[4096];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 30, 10);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	resize_screen(expected, sizeof(expected), 1, 30, 10, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief A resize inside an escape sequence redraws and does not break the sequence: ESC, resize, [B is still Down. */
+static void test_notvim_resize_inside_an_escape_sequence_keeps_the_sequence(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], after[4096], expected[4096], down[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	ssize_t w1 = write(master, "\x1b", 1);
+	usleep(10000); /* all pauses stay well inside the Esc timeout */
+	set_size(master, 5, 80);
+	usleep(10000);
+	ssize_t w2 = write(master, "[B", 2);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_INT(1, (int)w1);
+	TEST_ASSERT_EQUAL_INT(2, (int)w2);
+	resize_screen(expected, sizeof(expected), 1, 5, 40, 1);
+	resize_screen(down, sizeof(down), 1, 5, 40, 2);
+	strcat(expected, down);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief SIGTERM after a resize still restores the terminal and exits with 143. */
+static void test_notvim_sigterm_after_a_resize_still_exits_cleanly(void) {
+	char content[2048];
+	resize_file_content(content, sizeof(content));
+	const char *path = tmpdir_write("resize.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], resized[2048], last[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	set_size(master, 5, 80);
+	size_t n = read_output(master, resized, sizeof(resized));
+	kill(pid, SIGTERM);
+	read_output(master, last, sizeof(last));
+	int status = wait_exit(pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_TRUE(n > 0);
+	TEST_ASSERT_EQUAL_STRING(ALT_LEAVE, last);
+	TEST_ASSERT_EQUAL_INT(128 + SIGTERM, status);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -653,4 +887,12 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_refuses_when_input_is_not_a_terminal);
 	RUN_TEST(test_notvim_refuses_when_output_is_not_a_terminal);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
+	RUN_TEST(test_notvim_redraws_for_the_new_size_after_a_shrink);
+	RUN_TEST(test_notvim_scrolls_to_keep_the_cursor_visible_after_a_shrink);
+	RUN_TEST(test_notvim_shows_more_rows_after_the_terminal_grows);
+	RUN_TEST(test_notvim_last_size_wins_after_a_burst_of_resizes);
+	RUN_TEST(test_notvim_draw_buffer_grows_with_the_terminal);
+	RUN_TEST(test_notvim_draw_buffer_fits_a_tall_narrow_terminal);
+	RUN_TEST(test_notvim_resize_inside_an_escape_sequence_keeps_the_sequence);
+	RUN_TEST(test_notvim_sigterm_after_a_resize_still_exits_cleanly);
 }
