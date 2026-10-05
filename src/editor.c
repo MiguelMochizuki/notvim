@@ -8,6 +8,7 @@
 #include <string.h>
 #include <errno.h>
 #include "editor.h"
+#include "utf8.h"
 
 int editor_should_exit(char c) {
 	return c == 0x11; /* Ctrl+Q = DC1 */
@@ -73,14 +74,14 @@ void editor_scroll(editor_t *e, size_t rows) {
 	}
 }
 
-/** @brief Last valid column on line @p y: its last character, or 0 for an empty line. */
+/** @brief Start of the last cell on line @p y (a character or an invalid byte), or 0 for an empty line. */
 static size_t last_col(const editor_t *e, size_t y) {
-	size_t len = strlen(e->lines[y]);
-	return len ? len - 1 : 0;
+	return utf8_prev(e->lines[y], strlen(e->lines[y]));
 }
 
 void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->count == 0) return;
+	const char *line;
 	switch (dir) {
 	case EDITOR_MOVE_UP:
 		if (e->cy > 0) e->cy--;
@@ -89,13 +90,17 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 		if (e->cy + 1 < e->count) e->cy++;
 		break;
 	case EDITOR_MOVE_LEFT:
-		if (e->cx > 0) e->cx--;
+		line = e->lines[e->cy];
+		e->cx = utf8_prev(line, e->cx);
 		break;
 	case EDITOR_MOVE_RIGHT:
-		e->cx++; /* clamped below */
+		line = e->lines[e->cy];
+		e->cx += utf8_cell_len(line + e->cx); /* clamped below */
 		break;
 	}
-	if (e->cx > last_col(e, e->cy)) e->cx = last_col(e, e->cy);
+	size_t last = last_col(e, e->cy);
+	if (e->cx > last) e->cx = last;
+	else e->cx = utf8_prev(e->lines[e->cy], e->cx + 1); /* a vertical move can land inside a character: back to its start */
 }
 
 /** Tabs stop at every multiple of this many columns. */
@@ -106,38 +111,45 @@ static int is_control(unsigned char c) {
 	return (c < 0x20 && c != '\t') || c == 0x7f;
 }
 
-/** @brief Width in columns of byte @p c drawn at column @p col: a tab goes to the next tab stop, a mark such as ^A is two. */
-static size_t cell_width(unsigned char c, size_t col) {
+/**
+ * @brief Width in columns of the cell at @p p drawn at column @p col: a tab goes to the next tab stop,
+ *        a mark such as ^A is two, anything else (a character, '?' for an invalid byte or C1) is one.
+ */
+static size_t cell_width(const char *p, size_t col) {
+	unsigned char c = (unsigned char)*p;
 	if (c == '\t') return TAB_STOP - col % TAB_STOP;
 	return is_control(c) ? 2 : 1;
 }
 
-/** @brief Display column of byte index @p cx in @p line: the width of the bytes before it. */
+/** @brief Display column of byte index @p cx in @p line: the width of the cells before it. */
 static size_t display_col(const char *line, size_t cx) {
 	size_t col = 0;
-	for (size_t i = 0; i < cx && line[i]; i++) col += cell_width((unsigned char)line[i], col);
+	for (size_t i = 0; i < cx && line[i]; i += utf8_cell_len(line + i)) col += cell_width(line + i, col);
 	return col;
 }
 
-/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a mark. */
+/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a character or a mark. */
 static void put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
 	static const char spaces[TAB_STOP + 1] = "        ";
 	size_t col = 0;
-	for (const unsigned char *p = (const unsigned char *)line; *p; p++) {
-		size_t w = cell_width(*p, col);
+	for (const char *p = line; *p; p += utf8_cell_len(p)) {
+		size_t w = cell_width(p, col);
 		size_t room = max_cols - col;
 		if (*p == '\t') {
 			size_t n = w < room ? w : room; /* spaces can be cut anywhere */
 			put(out, pos, max, spaces, n);
 			col += n; /* if the tab was cut, col == max_cols and the loop ends below */
 		} else if (w > room) {
-			break; /* never show half of a mark */
-		} else if (is_control(*p)) {
+			break; /* never show half of a mark, and room is 0 at the right edge */
+		} else if (is_control((unsigned char)*p)) {
 			char mark[2] = { '^', *p == 0x7f ? '?' : (char)(*p ^ 0x40) };
 			put(out, pos, max, mark, 2);
 			col += w;
+		} else if (utf8_valid_len(p) == 0 || utf8_is_c1(p)) {
+			put(out, pos, max, "?", 1); /* cannot act on the terminal */
+			col += w;
 		} else {
-			put(out, pos, max, (const char *)p, 1);
+			put(out, pos, max, p, utf8_cell_len(p));
 			col += w;
 		}
 	}

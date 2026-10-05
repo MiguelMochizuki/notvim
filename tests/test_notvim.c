@@ -820,6 +820,172 @@ static void test_notvim_sigterm_after_a_resize_still_exits_cleanly(void) {
 	TEST_ASSERT_EQUAL_INT(128 + SIGTERM, status);
 }
 
+/** @brief Append @p count copies of @p unit to @p dst. */
+static void append_repeated(char *dst, const char *unit, int count) {
+	for (int i = 0; i < count; i++) strcat(dst, unit);
+}
+
+/** @brief A line of 100 e-acutes on 80 columns shows exactly 80 characters (the exact bytes, so no half character). */
+static void test_notvim_clips_a_wide_utf8_line_by_characters(void) {
+	char content[512] = "", text[512] = "";
+	append_repeated(content, "\xc3\xa9", 100);
+	strcat(content, "\nx\n");
+	append_repeated(text, "\xc3\xa9", 80);
+	strcat(text, "\r\nx");
+	const char *path = tmpdir_write("wide.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+}
+
+/** @brief Invalid bytes and C1 controls (including U+009B, a CSI) reach the terminal as '?'. */
+static void test_notvim_draws_invalid_bytes_and_c1_controls_as_question_marks(void) {
+	const char *path = tmpdir_write("bad.txt", "a\xff" "b\xc2\x9b[2Jc\xe2\x82" "z\xe2\x1b[2Jq\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[512], expected[512];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), "a?b?[2Jc??z?^[[2Jq", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+}
+
+/** Room for a screen of 24 lines of 80 four-byte characters, and for the file that holds it. */
+#define SCREEN_BYTES 16384
+
+/** @brief Run notvim on a file of 30 lines of 80 copies of @p unit, starting with @p start_rows rows, and compare the full 24x80 screen. */
+static void assert_full_multibyte_screen(const char *unit, unsigned short start_rows) {
+	static char content[SCREEN_BYTES], text[SCREEN_BYTES], expected[SCREEN_BYTES * 2], got[SCREEN_BYTES * 2], first[SCREEN_BYTES * 2];
+	content[0] = text[0] = '\0';
+	for (int i = 0; i < 30; i++) {
+		append_repeated(content, unit, 80);
+		strcat(content, "\n");
+	}
+	for (int i = 0; i < 24; i++) {
+		if (i > 0) strcat(text, "\r\n");
+		append_repeated(text, unit, 80);
+	}
+	const char *path = tmpdir_write("full.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, start_rows, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	if (start_rows != 24) {
+		set_size(master, 24, 80);
+		read_output(master, got, sizeof(got));
+	}
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	if (start_rows == 24) {
+		first_screen(expected, sizeof(expected), text, 1, 1);
+		TEST_ASSERT_EQUAL_STRING(expected, first);
+	} else {
+		screen(expected, sizeof(expected), text, 1, 1);
+		TEST_ASSERT_EQUAL_STRING(expected, got);
+	}
+}
+
+/** @brief A full 24x80 screen of 2-byte characters is drawn completely at startup. */
+static void test_notvim_full_screen_of_two_byte_text_is_not_truncated(void) {
+	assert_full_multibyte_screen("\xc3\xa9", 24);
+}
+
+/** @brief A full screen of 3-byte characters (5.8 KB) is drawn completely: a buffer of 2 bytes per column is too small. */
+static void test_notvim_full_screen_of_three_byte_text_is_not_truncated(void) {
+	assert_full_multibyte_screen("\xe2\x82\xac", 24);
+}
+
+/** @brief A full screen of 4-byte characters (7.7 KB) is drawn completely: a buffer of 3 bytes per column is too small. */
+static void test_notvim_full_screen_of_four_byte_text_is_not_truncated(void) {
+	assert_full_multibyte_screen("\xf0\x9f\x98\x80", 24);
+}
+
+/** @brief Growing from 2 rows to 24 draws the full screen of 2-byte characters on the resize path. */
+static void test_notvim_resize_draws_a_full_screen_of_two_byte_text(void) {
+	assert_full_multibyte_screen("\xc3\xa9", 2);
+}
+
+/** @brief Growing from 2 rows to 24 draws the full screen of 3-byte characters on the resize path. */
+static void test_notvim_resize_draws_a_full_screen_of_three_byte_text(void) {
+	assert_full_multibyte_screen("\xe2\x82\xac", 2);
+}
+
+/** @brief Growing from 2 rows to 24 draws the full screen of 4-byte characters on the resize path. */
+static void test_notvim_resize_draws_a_full_screen_of_four_byte_text(void) {
+	assert_full_multibyte_screen("\xf0\x9f\x98\x80", 2);
+}
+
+/** @brief 'l' and 'j' move by character: after one 'l' on three e-acutes, 'j' stays on the second character of the next line. */
+static void test_notvim_cursor_moves_by_character_over_utf8_text(void) {
+	const char *path = tmpdir_write("move.txt", "\xc3\xa9\xc3\xa9\xc3\xa9\nabcdef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[512], after_l[1024], after_j[1024], expected[1024];
+	const char *text = "\xc3\xa9\xc3\xa9\xc3\xa9\r\nabcdef";
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "l", after_l, sizeof(after_l));
+	send_and_read(master, "j", after_j, sizeof(after_j));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	screen(expected, sizeof(expected), text, 1, 2); /* one character right, not one byte: column 2 */
+	TEST_ASSERT_EQUAL_STRING(expected, after_l);
+	screen(expected, sizeof(expected), text, 2, 3); /* cx is byte 2, kept by 'j' on a line of one-byte characters */
+	TEST_ASSERT_EQUAL_STRING(expected, after_j);
+}
+
+/** @brief h, j, k and the arrow keys move by character, and a vertical move into a character snaps to its start. */
+static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
+	const char *path = tmpdir_write("nav.txt", "abcdef\n\xc3\xa9\xc3\xa9\xc3\xa9\nabcdef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	const char *text = "abcdef\r\n\xc3\xa9\xc3\xa9\xc3\xa9\r\nabcdef";
+	struct { const char *keys; int row, col; } steps[] = {
+		{ "l", 1, 2 }, { "l", 1, 3 }, { "l", 1, 4 },
+		{ "j", 2, 2 },        /* byte 3 is inside the second e-acute: snap back to its start, column 2 */
+		{ "\x1b[C", 2, 3 },   /* right arrow: next character, byte 4 */
+		{ "\x1b[A", 1, 5 },   /* up: byte 4 on an ASCII line */
+		{ "\x1b[D", 1, 4 },   /* left arrow */
+		{ "j", 2, 2 },        /* byte 3 again: snap */
+		{ "h", 2, 1 },        /* left: previous character, byte 0 */
+		{ "k", 1, 1 },
+	};
+	int master;
+	char first[1024], got[10][1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	for (size_t i = 0; i < 10; i++) send_and_read(master, steps[i].keys, got[i], sizeof(got[i]));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	for (size_t i = 0; i < 10; i++) {
+		char expected[1024];
+		screen(expected, sizeof(expected), text, steps[i].row, steps[i].col);
+		TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, got[i], steps[i].keys);
+	}
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -870,4 +1036,14 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_draw_buffer_fits_a_tall_narrow_terminal);
 	RUN_TEST(test_notvim_resize_inside_an_escape_sequence_keeps_the_sequence);
 	RUN_TEST(test_notvim_sigterm_after_a_resize_still_exits_cleanly);
+	RUN_TEST(test_notvim_clips_a_wide_utf8_line_by_characters);
+	RUN_TEST(test_notvim_draws_invalid_bytes_and_c1_controls_as_question_marks);
+	RUN_TEST(test_notvim_full_screen_of_two_byte_text_is_not_truncated);
+	RUN_TEST(test_notvim_full_screen_of_three_byte_text_is_not_truncated);
+	RUN_TEST(test_notvim_full_screen_of_four_byte_text_is_not_truncated);
+	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_two_byte_text);
+	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_three_byte_text);
+	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_four_byte_text);
+	RUN_TEST(test_notvim_navigates_by_character_with_keys_and_arrows);
+	RUN_TEST(test_notvim_cursor_moves_by_character_over_utf8_text);
 }

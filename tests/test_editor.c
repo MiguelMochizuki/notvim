@@ -813,6 +813,348 @@ static void test_editor_draw_cursor_column_after_a_tab_in_the_middle(void) {
 	assert_draw(24, CLEAR_HOME "ab      c" "\x1b[1;3H");
 }
 
+/** @brief Press @p dir @p n times on the shared editor. */
+static void move_n(editor_move_t dir, int n) {
+	for (int i = 0; i < n; i++) editor_move_cursor(&e, dir);
+}
+
+/** @brief Assert that the cursor column of editor_draw() with @p max_cols columns is @p col (1-based) on row 1. */
+static void assert_draw_cursor_col(size_t max_cols, size_t col) {
+	char out[512], expected[32];
+	editor_draw(&e, 24, max_cols, out, sizeof(out));
+	snprintf(expected, sizeof(expected), "\x1b[1;%zuH", col);
+	const char *tail = out + strlen(out) - strlen(expected);
+	TEST_ASSERT_TRUE(tail >= out);
+	TEST_ASSERT_EQUAL_STRING(expected, tail);
+}
+
+/** @brief A lead byte followed by a control byte does not swallow it: the ESC is still drawn as a mark. */
+static void test_editor_render_does_not_swallow_a_control_byte_after_a_lead_byte(void) {
+	editor_init(&e);
+	append("\xe2\x1b[2J");
+	assert_render_cols(ALL_COLS, "?^[[2J");
+	editor_free(&e);
+	editor_init(&e);
+	append("\xc3\tx");
+	assert_render_cols(ALL_COLS, "?       x"); /* the tab goes from column 1 to 8: seven spaces */
+}
+
+/** @brief Clipping to N columns keeps N whole characters of 1, 2, 3 and 4 bytes and never cuts one. */
+static void test_editor_render_clips_utf8_by_characters(void) {
+	editor_init(&e);
+	append("a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z"); /* a, e-acute, euro, emoji, z: 5 columns, 11 bytes */
+	assert_render_cols(0, "");
+	assert_render_cols(1, "a");
+	assert_render_cols(2, "a\xc3\xa9");
+	assert_render_cols(3, "a\xc3\xa9\xe2\x82\xac");
+	assert_render_cols(4, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80");
+	assert_render_cols(5, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+	assert_render_cols(80, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+}
+
+/** @brief A line of 201 bytes, 'a' and 100 e-acutes, clipped to 80 columns is 80 characters of valid UTF-8. */
+static void test_editor_render_clips_a_long_utf8_line_to_80_columns(void) {
+	char line[256] = "a", expected[256] = "a";
+	for (int i = 0; i < 100; i++) strcat(line, "\xc3\xa9");
+	for (int i = 0; i < 79; i++) strcat(expected, "\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(201, strlen(line));
+	editor_init(&e);
+	append(line);
+	assert_render_cols(80, expected);
+}
+
+/** @brief An invalid byte is drawn as one '?', whatever it is. */
+static void test_editor_render_shows_invalid_bytes_as_question_marks(void) {
+	editor_init(&e);
+	append("a\xff" "b\x80" "c\xfe" "d");
+	assert_render_cols(ALL_COLS, "a?b?c?d");
+}
+
+/** @brief Overlong forms, surrogates and code points above U+10FFFF give one '?' per byte. */
+static void test_editor_render_shows_each_byte_of_an_invalid_sequence_as_a_question_mark(void) {
+	editor_init(&e);
+	append("\xc0\x80" "|\xed\xa0\x80" "|\xf4\x90\x80\x80" "|\xe0\x80\x80");
+	assert_render_cols(ALL_COLS, "??|???|????|???");
+}
+
+/** @brief A truncated sequence is '?' for its lead byte, and the byte after it is drawn normally. */
+static void test_editor_render_shows_a_truncated_sequence_as_question_marks(void) {
+	editor_init(&e);
+	append("\xe2\x82" "z");
+	assert_render_cols(ALL_COLS, "??z");
+	editor_free(&e);
+	editor_init(&e);
+	append("x\xf0\x9f\x98"); /* cut by the end of the line */
+	assert_render_cols(ALL_COLS, "x???");
+}
+
+/** @brief C1 controls U+0080 to U+009F are drawn as one '?' each, so that U+009B (CSI) cannot reach the terminal. */
+static void test_editor_render_shows_c1_controls_as_question_marks(void) {
+	editor_init(&e);
+	append("a\xc2\x80" "b\xc2\x9b" "[2J\xc2\x9f" "c");
+	assert_render_cols(ALL_COLS, "a?b?[2J?c");
+}
+
+/** @brief The neighbours of the C1 range are valid characters and are copied: U+00A0 and U+00C0. */
+static void test_editor_render_copies_characters_next_to_the_c1_range(void) {
+	editor_init(&e);
+	append("\xc2\xa0\xc3\x80");
+	assert_render_cols(ALL_COLS, "\xc2\xa0\xc3\x80");
+}
+
+/** @brief '?' for an invalid byte or a C1 control takes one column when clipping. */
+static void test_editor_render_clips_question_marks_by_column(void) {
+	editor_init(&e);
+	append("\xff\xc2\x85\xff" "x");
+	assert_render_cols(2, "??");
+	assert_render_cols(3, "???");
+	assert_render_cols(4, "???x");
+}
+
+/** @brief UTF-8 text mixes with marks and tabs: the widths add up and clipping stays on whole characters. */
+static void test_editor_render_mixes_utf8_with_marks_and_tabs(void) {
+	editor_init(&e);
+	append("\xc3\xa9\x01\t" "x"); /* e-acute (1), ^A (2), tab to column 8 (5 spaces) */
+	assert_render_cols(2, "\xc3\xa9"); /* ^A needs two columns and one is left */
+	assert_render_cols(3, "\xc3\xa9^A");
+	assert_render_cols(5, "\xc3\xa9^A  ");
+	assert_render_cols(9, "\xc3\xa9^A     x");
+}
+
+/** @brief An invalid byte and a C1 control each advance the column by one, so the tab after them stops at column 8. */
+static void test_editor_render_tab_after_question_mark_cells(void) {
+	editor_init(&e);
+	append("\xff\xc2\x85\tx"); /* two '?' cells (2 columns), then 6 spaces */
+	assert_render_cols(ALL_COLS, "??      x");
+	assert_render_cols(4, "??  ");
+	assert_render_cols(8, "??      ");
+}
+
+/** @brief The drawn cursor column counts characters, not bytes: after e-acute, euro sign and emoji. */
+static void test_editor_draw_cursor_column_counts_characters(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+	const size_t starts[] = { 0, 2, 5, 9 }; /* byte index of each character */
+	for (size_t i = 0; i < 4; i++) {
+		e.cx = starts[i];
+		assert_draw_cursor_col(ALL_COLS, i + 1);
+	}
+}
+
+/** @brief Each invalid byte and a whole C1 control is one column before the cursor. */
+static void test_editor_draw_cursor_column_counts_invalid_bytes_and_c1(void) {
+	editor_init(&e);
+	append("\xff\xc2\x85" "b");
+	e.cx = 1;
+	assert_draw_cursor_col(ALL_COLS, 2); /* on the C1 control, after the invalid byte */
+	e.cx = 3;
+	assert_draw_cursor_col(ALL_COLS, 3); /* on the b */
+}
+
+/** @brief Multi-byte characters, marks and tabs before the cursor all add their columns. */
+static void test_editor_draw_cursor_column_mixes_widths(void) {
+	editor_init(&e);
+	append("\xc3\xa9\x01\t" "x");
+	e.cx = 3; /* on the tab: after e-acute (1) and ^A (2) */
+	assert_draw_cursor_col(ALL_COLS, 4);
+	e.cx = 4; /* on the x: the tab went to column 8 */
+	assert_draw_cursor_col(ALL_COLS, 9);
+}
+
+/** @brief The column after '?' cells and a tab: the cursor on the tab and on the x that follows it. */
+static void test_editor_draw_cursor_column_after_question_mark_cells_and_a_tab(void) {
+	editor_init(&e);
+	append("\xff\xc2\x85\tx");
+	e.cx = 3; /* on the tab, after two cells */
+	assert_draw_cursor_col(ALL_COLS, 3);
+	e.cx = 4; /* on the x: the tab went from column 2 to 8 */
+	assert_draw_cursor_col(ALL_COLS, 9);
+}
+
+/** @brief A cursor column past the right edge is drawn on the last column, counted in characters. */
+static void test_editor_draw_cursor_column_is_clamped_to_the_width_in_characters(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9\xc3\xa9");
+	e.cx = 8; /* the fifth character */
+	assert_draw_cursor_col(3, 3);
+	assert_draw_cursor_col(5, 5);
+	assert_draw_cursor_col(6, 5);
+}
+
+/**
+ * @brief editor_draw() keeps a whole screen of multi-byte text when the buffer has 4 bytes per column.
+ * @note It is the clipping that fails today, not the buffer: the end-to-end tests with 3 and 4-byte
+ *       characters in test_notvim.c pin the size of the buffer that main() allocates.
+ */
+static void test_editor_draw_full_screen_of_multibyte_text_is_complete(void) {
+	enum { ROWS = 5, COLS = 20 };
+	char line[COLS * 2 + 1] = "", expected[ROWS * (COLS * 2 + 2) + 64] = CLEAR_HOME;
+	for (int i = 0; i < COLS; i++) strcat(line, "\xc3\xa9");
+	editor_init(&e);
+	for (int i = 0; i < ROWS; i++) {
+		append(line);
+		if (i > 0) strcat(expected, "\r\n");
+		strcat(expected, line);
+	}
+	strcat(expected, "\x1b[1;1H");
+	char out[ROWS * (COLS * 4 + 2) + EDITOR_DRAW_OVERHEAD];
+	size_t n = editor_draw(&e, ROWS, COLS, out, sizeof(out));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief Right moves one character at a time over 1, 2, 3 and 4-byte characters and stops on the last one. */
+static void test_editor_cursor_right_moves_by_characters(void) {
+	editor_init(&e);
+	append("a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80"); /* characters start at 0, 1, 3, 6 */
+	const size_t starts[] = { 1, 3, 6, 6, 6 };
+	for (size_t i = 0; i < 5; i++) {
+		editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+		assert_cursor(0, starts[i]);
+	}
+}
+
+/** @brief Left moves back one character at a time and stops at column 0. */
+static void test_editor_cursor_left_moves_by_characters(void) {
+	editor_init(&e);
+	append("a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80");
+	e.cx = 6;
+	const size_t starts[] = { 3, 1, 0, 0 };
+	for (size_t i = 0; i < 4; i++) {
+		editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+		assert_cursor(0, starts[i]);
+	}
+}
+
+/** @brief Right and left on an empty line, and left at the start of a multi-byte line, stay put. */
+static void test_editor_cursor_stays_put_on_an_empty_line_and_at_the_start(void) {
+	editor_init(&e);
+	append("");
+	append("\xc3\xa9\xc3\xa9");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(0, 0);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(1, 0);
+}
+
+/** @brief Two presses of right on three e-acutes put the cursor on the third, never inside the second. */
+static void test_editor_cursor_right_never_lands_inside_a_character(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xc3\xa9\xc3\xa9");
+	move_n(EDITOR_MOVE_RIGHT, 2);
+	assert_cursor(0, 4);
+}
+
+/** @brief Each invalid byte is a stop for right and left. */
+static void test_editor_cursor_visits_each_invalid_byte(void) {
+	editor_init(&e);
+	append("a\xff\xfe" "b\xe2\x82" "z");
+	const size_t right[] = { 1, 2, 3, 4, 5, 6, 6 };
+	for (size_t i = 0; i < 7; i++) {
+		editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+		assert_cursor(0, right[i]);
+	}
+	const size_t left[] = { 5, 4, 3, 2, 1, 0 };
+	for (size_t i = 0; i < 6; i++) {
+		editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+		assert_cursor(0, left[i]);
+	}
+}
+
+/** @brief A C1 control is one stop of two bytes. */
+static void test_editor_cursor_moves_over_a_c1_control_as_one_character(void) {
+	editor_init(&e);
+	append("a\xc2\x85" "b");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 1);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 3);
+	editor_move_cursor(&e, EDITOR_MOVE_LEFT);
+	assert_cursor(0, 1);
+}
+
+/** @brief Down to a shorter line puts the cursor on the start of its last character, not on its last byte. */
+static void test_editor_cursor_down_clamps_to_the_start_of_the_last_character(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("\xc3\xa9\xe2\x82\xac"); /* last character starts at 2 and ends at 4 */
+	move_n(EDITOR_MOVE_RIGHT, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcdef");
+	append("a\xf0\x9f\x98\x80"); /* 4-byte last character at 1 */
+	move_n(EDITOR_MOVE_RIGHT, 5);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 1);
+}
+
+/** @brief Up clamps the same way. */
+static void test_editor_cursor_up_clamps_to_the_start_of_the_last_character(void) {
+	editor_init(&e);
+	append("a\xf0\x9f\x98\x80"); /* 4-byte last character at 1 */
+	append("abcdef");
+	e.cy = 1;
+	e.cx = 5;
+	editor_move_cursor(&e, EDITOR_MOVE_UP);
+	assert_cursor(0, 1);
+}
+
+/** @brief A last invalid byte or C1 control is a character start: the cursor lands on it, not after it. */
+static void test_editor_cursor_vertical_clamp_uses_invalid_bytes_and_c1_as_characters(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab\xff");
+	append("a\xc2\x85");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	move_n(EDITOR_MOVE_RIGHT, 4);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN); /* byte 2 is inside the C1 control, which starts at 1 */
+	assert_cursor(2, 1);
+}
+
+/** @brief A vertical move that lands inside a character moves the cursor back to the start of that character. */
+static void test_editor_cursor_vertical_move_never_lands_inside_a_character(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("\xc3\xa9\xe2\x82\xac" "z"); /* characters start at 0, 2, 5 */
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* cx 1: inside the e-acute on the next line */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 0);
+	editor_free(&e);
+	editor_init(&e);
+	append("abcdef");
+	append("\xc3\xa9\xe2\x82\xac" "z");
+	move_n(EDITOR_MOVE_RIGHT, 3); /* cx 3: inside the euro sign */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 2);
+}
+
+/** @brief Down onto a line where the column is already a character start keeps the byte index. */
+static void test_editor_cursor_vertical_move_keeps_a_valid_byte_index(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xe2\x82\xac" "z");
+	append("abcdefgh");
+	e.cx = 5; /* the z */
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_cursor(1, 5);
+}
+
+/** @brief The cursor on the last 4-byte character, exactly at the width, is drawn on that last column. */
+static void test_editor_draw_cursor_on_the_last_four_byte_character_at_the_width(void) {
+	editor_init(&e);
+	append("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80");
+	e.cx = 8;
+	assert_draw_cursor_col(3, 3);
+	assert_draw_cursor_col(4, 3);
+	e.cx = 4;
+	assert_draw_cursor_col(3, 2);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -890,4 +1232,33 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_offset_past_the_end_is_empty);
 	RUN_TEST(test_editor_draw_cursor_row_is_relative_to_the_offset);
 	RUN_TEST(test_editor_draw_cursor_above_the_window_is_row_one);
+	RUN_TEST(test_editor_render_clips_utf8_by_characters);
+	RUN_TEST(test_editor_render_clips_a_long_utf8_line_to_80_columns);
+	RUN_TEST(test_editor_render_shows_invalid_bytes_as_question_marks);
+	RUN_TEST(test_editor_render_shows_each_byte_of_an_invalid_sequence_as_a_question_mark);
+	RUN_TEST(test_editor_render_shows_a_truncated_sequence_as_question_marks);
+	RUN_TEST(test_editor_render_shows_c1_controls_as_question_marks);
+	RUN_TEST(test_editor_render_copies_characters_next_to_the_c1_range);
+	RUN_TEST(test_editor_render_clips_question_marks_by_column);
+	RUN_TEST(test_editor_render_mixes_utf8_with_marks_and_tabs);
+	RUN_TEST(test_editor_draw_cursor_column_counts_characters);
+	RUN_TEST(test_editor_draw_cursor_column_counts_invalid_bytes_and_c1);
+	RUN_TEST(test_editor_draw_cursor_column_mixes_widths);
+	RUN_TEST(test_editor_draw_cursor_column_is_clamped_to_the_width_in_characters);
+	RUN_TEST(test_editor_draw_full_screen_of_multibyte_text_is_complete);
+	RUN_TEST(test_editor_cursor_right_moves_by_characters);
+	RUN_TEST(test_editor_cursor_left_moves_by_characters);
+	RUN_TEST(test_editor_cursor_right_never_lands_inside_a_character);
+	RUN_TEST(test_editor_cursor_visits_each_invalid_byte);
+	RUN_TEST(test_editor_cursor_moves_over_a_c1_control_as_one_character);
+	RUN_TEST(test_editor_cursor_down_clamps_to_the_start_of_the_last_character);
+	RUN_TEST(test_editor_cursor_up_clamps_to_the_start_of_the_last_character);
+	RUN_TEST(test_editor_cursor_vertical_clamp_uses_invalid_bytes_and_c1_as_characters);
+	RUN_TEST(test_editor_cursor_vertical_move_never_lands_inside_a_character);
+	RUN_TEST(test_editor_cursor_vertical_move_keeps_a_valid_byte_index);
+	RUN_TEST(test_editor_render_does_not_swallow_a_control_byte_after_a_lead_byte);
+	RUN_TEST(test_editor_render_tab_after_question_mark_cells);
+	RUN_TEST(test_editor_draw_cursor_column_after_question_mark_cells_and_a_tab);
+	RUN_TEST(test_editor_cursor_stays_put_on_an_empty_line_and_at_the_start);
+	RUN_TEST(test_editor_draw_cursor_on_the_last_four_byte_character_at_the_width);
 }

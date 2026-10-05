@@ -42,8 +42,8 @@ static int key_to_move(int key, editor_move_t *dir) {
 
 /** @brief Size in bytes of the draw buffer for a terminal of @p rows by @p cols. */
 static size_t draw_buffer_size(int rows, int cols) {
-	/* each of the rows lines is clipped to cols bytes, plus "\r\n" between them */
-	return (size_t)rows * ((size_t)cols + 2) + EDITOR_DRAW_OVERHEAD;
+	/* each of the rows lines holds up to cols characters of up to 4 bytes, plus "\r\n" between them */
+	return (size_t)rows * ((size_t)cols * 4 + 2) + EDITOR_DRAW_OVERHEAD;
 }
 
 /** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes. */

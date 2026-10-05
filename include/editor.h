@@ -13,7 +13,7 @@ typedef struct {
 	size_t count; /**< Number of lines in use in @ref lines. */
 	size_t cap;   /**< Allocated capacity of @ref lines, in lines. */
 	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
-	size_t cx;    /**< Cursor column: byte index in that line. */
+	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte). */
 	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
 } editor_t;
 
@@ -95,9 +95,14 @@ int editor_append_line(editor_t *e, const char *text);
  *
  * The cursor never wraps and never leaves the text: up and down stop at the
  * first and last line, left stops at column 0, and right stops on the last
- * character of the line, as in Vim's normal mode. Moving to a shorter line
- * clamps the column to its last character; an empty line has column 0. The
- * column is not remembered across lines. An editor with no lines keeps the
+ * character of the line, as in Vim's normal mode. Text is UTF-8: left and
+ * right move one character, an invalid byte counts as one character, and a C1
+ * control (U+0080 to U+009F) is one character of two bytes. @c cx stays a
+ * byte index and never points inside a character: moving to a shorter line
+ * clamps it to the start of the last character, and a move that lands inside a
+ * character puts it back on that character's start (so it can drift left over
+ * multi-byte lines, as the column is not remembered across lines). An empty
+ * line has column 0. An editor with no lines keeps the
  * cursor at 0,0.
  *
  * @param e   Editor to modify; must not be NULL.
@@ -110,10 +115,14 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
  * turns off output processing. A blank line counts as a row. A tab is drawn
- * as spaces up to the next multiple of 8 columns (cut at the right edge). A control byte
+ * as spaces up to the next multiple of 8 columns (cut at the right edge). Text is UTF-8
+ * (RFC 3629): each valid character is one column and is copied as its bytes;
+ * each byte that is not part of a valid sequence, and each C1 control
+ * (U+0080 to U+009F, which some terminals act on), is drawn as one '?'.
+ * Wide and combining characters are not special: they also take one column. A control byte
  * (below 0x20 except tab, or 0x7f) is drawn as a two-column mark such as ^[
  * or ^?, so that a file can never send commands to the terminal; clipping
- * never shows half of a mark. Output is
+ * is by columns and never cuts a character or shows half of a mark. Output is
  * truncated to fit @p out_size, leaving room for the NUL.
  *
  * @param e        Editor to render; must not be NULL.
@@ -121,7 +130,7 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  *                 height; 0 renders nothing. The first line rendered is
  *                 line @c rowoff; a @c rowoff past the last line renders nothing.
  * @param max_cols Maximum number of columns of each line to render, usually
- *                 the terminal width. Longer lines are clipped on the right,
+ *                 the terminal width (columns, not bytes). Longer lines are clipped on the right,
  *                 so no line wraps and scrolls the terminal; there is no
  *                 horizontal scrolling yet.
  * @param out      Destination buffer.
@@ -154,7 +163,7 @@ int editor_load_file(editor_t *e, const char *path);
  * The output clears the screen and moves home, then holds editor_render() of
  * @p max_rows lines from @c rowoff, then moves the cursor to row
  * cy-rowoff+1 (row 1 if the cursor is above the window), at the display
- * column of cx plus 1 (marks are two columns wide and a tab goes to the next
+ * column of cx plus 1 (counted in characters; marks are two columns wide and a tab goes to the next
  * tab stop; the cursor is on the first column of a mark or tab). It
  * does not scroll: call editor_scroll() first. The cursor sequence is always complete: if @p out_size is too small
  * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
@@ -163,12 +172,13 @@ int editor_load_file(editor_t *e, const char *path);
  *
  * @param e        Editor to draw; must not be NULL.
  * @param max_rows Maximum number of lines to render, usually the terminal height.
- * @param max_cols Maximum number of bytes of each line, usually the terminal
+ * @param max_cols Maximum number of columns of each line, usually the terminal
  *                 width; see editor_render(). A cursor column past it is drawn
  *                 on the last column.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes; it should be at least
- *                 EDITOR_DRAW_OVERHEAD plus the rendered text.
+ *                 EDITOR_DRAW_OVERHEAD plus the rendered text, which is up to
+ *                 4 bytes per column plus 2 per row.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is
  *         smaller than EDITOR_DRAW_OVERHEAD.
  */
