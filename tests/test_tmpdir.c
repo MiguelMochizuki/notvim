@@ -5,8 +5,12 @@
 #define _DEFAULT_SOURCE /* mkdir under -std=c11 */
 #include <errno.h>
 #include <stdio.h>
+#include <signal.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
+#include <unistd.h>
 #include "unity.h"
 #include "test_tmpdir.h"
 #include "tmpdir.h"
@@ -96,6 +100,64 @@ static void test_tmpdir_after_destroy_returns_null(void) {
 	TEST_ASSERT_NULL(tmpdir_write("x", ""));
 }
 
+/**
+ * @brief Fork a child that makes its own directory and then ends.
+ *
+ * With @p use_sigterm the child raises SIGTERM and calls tmpdir_destroy();
+ * otherwise it calls exit(0). The child's directory path goes in @p path.
+ *
+ * @return The child's wait status.
+ */
+static int run_child(int use_sigterm, char *path, size_t size) {
+	int fds[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+	pid_t pid = fork();
+	TEST_ASSERT_TRUE(pid >= 0);
+	if (pid == 0) {
+		close(fds[0]);
+		tmpdir_destroy(); /* the inherited directory belongs to the parent test */
+		tmpdir_create();
+		tmpdir_write("x.txt", "x");
+		const char *dir = tmpdir_path(".");
+		if (write(fds[1], dir, strlen(dir) + 1) < 0) _exit(1);
+		close(fds[1]);
+		if (!use_sigterm) exit(0);
+		raise(SIGTERM);
+		tmpdir_destroy(); /* sees the signal and exits with 128 + SIGTERM */
+		_exit(99);
+	}
+	close(fds[1]);
+	ssize_t n = read(fds[0], path, size - 1);
+	close(fds[0]);
+	TEST_ASSERT_TRUE(n > 0);
+	path[n] = '\0';
+	int status = 0;
+	TEST_ASSERT_EQUAL_INT(pid, waitpid(pid, &status, 0));
+	return status;
+}
+
+/** @brief A process that calls exit() leaves no directory behind. */
+static void test_tmpdir_removed_on_exit(void) {
+	char path[128];
+	int status = run_child(0, path, sizeof(path));
+	TEST_ASSERT_TRUE(WIFEXITED(status));
+	TEST_ASSERT_EQUAL_INT(0, WEXITSTATUS(status));
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
+	TEST_ASSERT_EQUAL_INT(ENOENT, errno);
+}
+
+/** @brief After SIGTERM the directory is removed and the exit status is 128 + SIGTERM. */
+static void test_tmpdir_removed_after_sigterm(void) {
+	char path[128];
+	int status = run_child(1, path, sizeof(path));
+	TEST_ASSERT_TRUE(WIFEXITED(status));
+	TEST_ASSERT_EQUAL_INT(128 + SIGTERM, WEXITSTATUS(status));
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
+	TEST_ASSERT_EQUAL_INT(ENOENT, errno);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_tmpdir_suite(void) {
 	RUN_TEST(test_tmpdir_exists_after_setup);
@@ -106,4 +168,6 @@ void test_tmpdir_suite(void) {
 	RUN_TEST(test_tmpdir_destroy_removes_everything);
 	RUN_TEST(test_tmpdir_destroy_twice_is_safe);
 	RUN_TEST(test_tmpdir_after_destroy_returns_null);
+	RUN_TEST(test_tmpdir_removed_on_exit);
+	RUN_TEST(test_tmpdir_removed_after_sigterm);
 }

@@ -4,7 +4,12 @@
  *
  * Call tmpdir_create() from Unity's setUp() and tmpdir_destroy() from
  * tearDown(): tearDown() still runs after a failed assertion, so the
- * directory is always removed.
+ * directory is removed then too.
+ *
+ * Two more hooks cover other endings: the directory is also removed at
+ * exit(), and after SIGINT/SIGTERM the next tmpdir_destroy() removes it and
+ * exits with status 128 + signal. A crash, an ASan abort or SIGKILL still
+ * leaves it behind.
  */
 #ifndef TMPDIR_H
 #define TMPDIR_H
