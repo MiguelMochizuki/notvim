@@ -6,8 +6,11 @@
 
 ## To do
 
+- H1.5: As user, I want to see every line of the file, up to the terminal height, so I can read more than the first line
+> Notice: requires a multi-line buffer and the terminal size (`TIOCGWINSZ`); changes `editor_t` and `editor_render`.
 - H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
 - H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
+- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
 - H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
 - H3.2: As user, I want to type characters in insert mode and see them in the buffer
 - H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
