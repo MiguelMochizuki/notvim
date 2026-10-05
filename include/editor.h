@@ -7,18 +7,27 @@
 
 #include <stddef.h>
 
+/** Modes of the editor. */
+typedef enum {
+	EDITOR_MODE_NORMAL, /**< Normal mode: keys are commands; the cursor is always on a character. */
+	EDITOR_MODE_INSERT  /**< Insert mode: the cursor may also sit after the last character of the line. */
+} editor_mode_t;
+
 /** Editor state: the text as a growable array of lines. */
 typedef struct {
 	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
 	size_t count; /**< Number of lines in use in @ref lines. */
 	size_t cap;   /**< Allocated capacity of @ref lines, in lines. */
 	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
-	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte). */
+	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte), or
+	                   the length of the line in insert mode. */
 	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
 	size_t wantcol; /**< Wanted display column (Vim's curswant): where up and down try to put the cursor, so that it comes
 	                     back to its column after a shorter line. Set by a left or right move that moves; 0 after init, free
 	                     and load. @c cx and @c wantcol change together in editor_move_cursor(): code that assigns @c cx
 	                     directly must set @c wantcol too. */
+	editor_mode_t mode; /**< Current mode; @ref EDITOR_MODE_NORMAL after init, free and load. In insert mode @c cx may equal the
+	                         length of the line (the cursor is after the last character); in normal mode it never does. */
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
 	                   0 for an LF, mixed or empty file, no file, or after an error. */
 	char *path;   /**< Owned copy of the path given to the last successful editor_load_file(), even if that file does not
@@ -116,7 +125,8 @@ int editor_append_line(editor_t *e, const char *text);
  *
  * The cursor never wraps and never leaves the text: up and down stop at the
  * first and last line, left stops at column 0, and right stops on the last
- * character of the line, as in Vim's normal mode. Text is UTF-8: left and
+ * character of the line, as in Vim's normal mode; in insert mode (see editor_handle_key()) it may also go past the last
+ * character, onto the end of the line. Text is UTF-8: left and
  * right move one character, an invalid byte counts as one character, and a C1
  * control (U+0080 to U+009F) is one character of two bytes. @c cx stays a
  * byte index and never points inside a character.
@@ -138,6 +148,25 @@ int editor_append_line(editor_t *e, const char *text);
  * @param dir Direction to move.
  */
 void editor_move_cursor(editor_t *e, editor_move_t dir);
+
+/**
+ * @brief Handle one key (from key_parser_feed()) in the current mode.
+ *
+ * Normal mode: 'i' enters insert mode with the cursor where it is; the arrow keys and h/j/k/l move the cursor with
+ * editor_move_cursor(); anything else does nothing. Insert mode: KEY_ESC leaves it, moving the cursor one character
+ * left unless it is at column 0, as Vim does, and sets @c wantcol to the new column; only the arrow keys move the
+ * cursor (h/j/k/l and every other key do nothing: typing comes later). KEY_ESC does nothing in normal mode.
+ *
+ * In insert mode editor_move_cursor() lets the cursor go one past the last character: right stops at the end of the
+ * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
+ * at the end of the line if @c wantcol is at or past the end of it (an empty line: 0).
+ *
+ * @param e   Editor to modify; must not be NULL.
+ * @param key A byte (0-255) or a KEY_ constant of keys.h.
+ * @return Non-zero if the key was a command of the current mode, so the screen must be redrawn (even if the cursor
+ *         did not move); 0 if it was ignored.
+ */
+int editor_handle_key(editor_t *e, int key);
 
 /**
  * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
@@ -214,7 +243,7 @@ size_t editor_text_rows(size_t rows);
 /**
  * @brief Label of the mode of @p e, as the status line shows it.
  * @param e Editor to describe; must not be NULL.
- * @return "NORMAL" (there are no other modes yet); a string literal, never NULL.
+ * @return "NORMAL" or "INSERT"; a string literal, never NULL.
  */
 const char *editor_mode_label(const editor_t *e);
 

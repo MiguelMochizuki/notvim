@@ -20,26 +20,6 @@ static void cleanup(void) {
 	terminal_leave_raw(STDIN_FILENO);
 }
 
-/**
- * @brief Translate an arrow key, or h/j/k/l as in Vim, into a cursor move.
- * @param key Key from key_parser_feed().
- * @param dir Receives the direction when @p key is a movement key.
- * @return 1 if @p key is a movement key, 0 otherwise.
- */
-static int key_to_move(int key, editor_move_t *dir) {
-	switch (key) {
-	case KEY_UP:
-	case 'k': *dir = EDITOR_MOVE_UP; return 1;
-	case KEY_DOWN:
-	case 'j': *dir = EDITOR_MOVE_DOWN; return 1;
-	case KEY_LEFT:
-	case 'h': *dir = EDITOR_MOVE_LEFT; return 1;
-	case KEY_RIGHT:
-	case 'l': *dir = EDITOR_MOVE_RIGHT; return 1;
-	default: return 0;
-	}
-}
-
 /** @brief Size in bytes of the draw buffer for a terminal of @p rows by @p cols. */
 static size_t draw_buffer_size(int rows, int cols) {
 	/* each of the rows lines (the status line is one of them) holds up to cols characters of up to 4 bytes, plus "ESC[K" after it and "\r\n" between them */
@@ -80,8 +60,8 @@ static int screen_draw(const screen_t *s, const editor_t *e) {
  * Usage: notvim [file]. It refuses to run unless stdin and stdout are
  * terminals, so that it never writes escape sequences into a pipe or a file.
  * The file is loaded before raw mode and the alternate
- * screen start, so a load error is printed on the normal terminal. The arrow keys and h/j/k/l move the
- * cursor and the screen is redrawn after each move.
+ * screen start, so a load error is printed on the normal terminal. Keys go to editor_handle_key() (normal and insert mode) and the screen is
+ * redrawn after each command.
  *
  * SIGWINCH makes it read the terminal size again, resize the draw buffer, scroll
  * so the cursor stays visible and redraw. If the buffer cannot grow, the old size is kept.
@@ -179,9 +159,7 @@ int main(int argc, char **argv) {
 		}
 		if (key == KEY_NONE) continue;
 		if (key < 256 && editor_should_exit((char)key)) break;
-		editor_move_t dir;
-		if (key_to_move(key, &dir)) {
-			editor_move_cursor(&e, dir);
+		if (editor_handle_key(&e, key)) {
 			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;

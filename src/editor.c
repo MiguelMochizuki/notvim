@@ -8,6 +8,7 @@
 #include <string.h>
 #include <errno.h>
 #include "editor.h"
+#include "keys.h"
 #include "utf8.h"
 
 int editor_should_exit(char c) {
@@ -19,6 +20,7 @@ void editor_init(editor_t *e) {
 	e->count = 0;
 	e->cap = 0;
 	e->crlf = 0;
+	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
 	e->cy = 0;
 	e->cx = 0;
@@ -108,27 +110,32 @@ static size_t last_col(const editor_t *e, size_t y) {
 	return utf8_prev(e->lines[y], strlen(e->lines[y]));
 }
 
-/** @brief Byte index of the character of @p line whose first display column is the largest one not above @p want; the last character if @p line is shorter, 0 if it is empty. */
-static size_t col_to_cx(const char *line, size_t want) {
+/**
+ * @brief Byte index of the character of @p line whose first display column is the largest one not above @p want; the last character if @p line is shorter, 0 if it is empty.
+ *
+ * With @p past_end (insert mode) a @p want at or past the display column where the line ends gives the end of the line (its length) instead.
+ */
+static size_t col_to_cx(const char *line, size_t want, int past_end) {
 	size_t col = 0, best = 0;
 	for (size_t i = 0; line[i]; i += utf8_cell_len(line + i)) {
-		if (col > want) break; /* compared without adding to @p want, so a huge value cannot wrap */
+		if (col > want) return best; /* compared without adding to @p want, so a huge value cannot wrap */
 		best = i;
 		col += cell_width(line + i, col);
 	}
-	return best;
+	return past_end && col <= want ? strlen(line) : best;
 }
 
 void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->count == 0) return;
 	const char *line = e->lines[e->cy];
+	int insert = e->mode == EDITOR_MODE_INSERT;
 	size_t old_cx = e->cx;
 	switch (dir) {
 	case EDITOR_MOVE_UP:
-		if (e->cy > 0) e->cx = col_to_cx(e->lines[--e->cy], e->wantcol);
+		if (e->cy > 0) e->cx = col_to_cx(e->lines[--e->cy], e->wantcol, insert);
 		return;
 	case EDITOR_MOVE_DOWN:
-		if (e->cy + 1 < e->count) e->cx = col_to_cx(e->lines[++e->cy], e->wantcol);
+		if (e->cy + 1 < e->count) e->cx = col_to_cx(e->lines[++e->cy], e->wantcol, insert);
 		return;
 	case EDITOR_MOVE_LEFT:
 		e->cx = utf8_prev(line, e->cx);
@@ -137,7 +144,7 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 		e->cx += utf8_cell_len(line + e->cx); /* clamped below */
 		break;
 	}
-	size_t last = last_col(e, e->cy);
+	size_t last = insert ? strlen(line) : last_col(e, e->cy);
 	if (e->cx > last) e->cx = last;
 	if (e->cx != old_cx) e->wantcol = display_col(line, e->cx); /* only a move that moves forgets the old column, as in Vim */
 }
@@ -319,8 +326,40 @@ size_t editor_draw_screen(const editor_t *e, size_t rows, size_t max_cols, char 
 }
 
 const char *editor_mode_label(const editor_t *e) {
-	(void)e;
-	return "NORMAL"; /* modes arrive with the insert mode */
+	return e->mode == EDITOR_MODE_INSERT ? "INSERT" : "NORMAL";
+}
+
+/** @brief Leave insert mode: one character left unless at column 0, as Vim does; the wanted column follows even when the cursor stays. */
+static void leave_insert(editor_t *e) {
+	e->mode = EDITOR_MODE_NORMAL;
+	if (e->cy >= e->count) return;
+	e->cx = utf8_prev(e->lines[e->cy], e->cx);
+	e->wantcol = display_col(e->lines[e->cy], e->cx);
+}
+
+int editor_handle_key(editor_t *e, int key) {
+	editor_move_t dir;
+	switch (key) {
+	case KEY_UP: dir = EDITOR_MOVE_UP; break;
+	case KEY_DOWN: dir = EDITOR_MOVE_DOWN; break;
+	case KEY_LEFT: dir = EDITOR_MOVE_LEFT; break;
+	case KEY_RIGHT: dir = EDITOR_MOVE_RIGHT; break;
+	case 'k': case 'j': case 'h': case 'l':
+		if (e->mode == EDITOR_MODE_INSERT) return 0; /* typing comes later */
+		dir = key == 'k' ? EDITOR_MOVE_UP : key == 'j' ? EDITOR_MOVE_DOWN : key == 'h' ? EDITOR_MOVE_LEFT : EDITOR_MOVE_RIGHT;
+		break;
+	case 'i':
+		if (e->mode == EDITOR_MODE_INSERT) return 0;
+		e->mode = EDITOR_MODE_INSERT;
+		return 1;
+	case KEY_ESC:
+		if (e->mode != EDITOR_MODE_INSERT) return 0;
+		leave_insert(e);
+		return 1;
+	default: return 0;
+	}
+	editor_move_cursor(e, dir);
+	return 1;
 }
 
 size_t editor_text_rows(size_t rows) {

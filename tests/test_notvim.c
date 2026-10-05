@@ -26,6 +26,8 @@ static unsigned short term_rows = 24, term_cols = 80;
 static char shown_name[1024] = "[No Name]";
 /** Whether the file of the last spawn is shown as a CRLF file: a test that loads one sets it after the spawn. */
 static int shown_dos;
+/** Mode label notvim shows in its status line: "NORMAL" after each spawn; a test that enters insert mode sets it before building the expected screens. */
+static const char *shown_mode = "NORMAL";
 
 /**
  * @brief Start ./notvim on a new pty of @p rows rows by @p cols columns.
@@ -42,6 +44,7 @@ static pid_t spawn_notvim_full(const char *file, unsigned short rows, unsigned s
 	term_cols = cols;
 	snprintf(shown_name, sizeof(shown_name), "%s", file ? file : "[No Name]");
 	shown_dos = 0;
+	shown_mode = "NORMAL";
 	pid_t pid = forkpty(master, NULL, NULL, &ws);
 	if (pid == 0) {
 		if (nonblock_out) fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK);
@@ -143,7 +146,7 @@ static void screen_at(char *buf, size_t size, const char *text, int row, int col
 		draw_expected(buf, size, text, term_rows, term_cols, row, col);
 		return;
 	}
-	status_expected(status, sizeof(status), shown_name, shown_dos, "NORMAL", (size_t)line, (size_t)fcol, term_cols);
+	status_expected(status, sizeof(status), shown_name, shown_dos, shown_mode, (size_t)line, (size_t)fcol, term_cols);
 	draw_expected_status(buf, size, text, (size_t)term_rows - 1, term_cols, status, term_rows, row, col);
 }
 
@@ -473,6 +476,105 @@ static void test_notvim_uppercase_hjkl_do_nothing(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	TEST_ASSERT_EQUAL_UINT(0, n);
+}
+
+/** @brief i enters insert mode (status INSERT, cursor kept) and Esc leaves it, one character to the left. */
+static void test_notvim_i_and_esc_switch_modes(void) {
+	const char *path = tmpdir_write("modes.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], ins[1024], esc[1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "l", ins, sizeof(ins));
+	send_and_read(master, "i", ins, sizeof(ins));
+	send_and_read(master, "\x1b", esc, sizeof(esc));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[1024];
+	shown_mode = "INSERT";
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, ins);
+	shown_mode = "NORMAL";
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, esc);
+}
+
+/** @brief The arrows work in insert mode, up to the end of the line; Esc then lands on the last character. */
+static void test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line(void) {
+	const char *path = tmpdir_write("insarrows.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], r1[1024], r2[1024], r3[1024], r4[1024], down[1024], up[1024], esc[1024], left[1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "i", r1, sizeof(r1));
+	send_and_read(master, "\x1b[C", r1, sizeof(r1));
+	send_and_read(master, "\x1b[C", r2, sizeof(r2));
+	send_and_read(master, "\x1b[C", r3, sizeof(r3));
+	size_t n = send_and_read(master, "\x1b[C", r4, sizeof(r4));
+	send_and_read(master, "\x1b[B", down, sizeof(down));
+	send_and_read(master, "\x1b[A", up, sizeof(up));
+	send_and_read(master, "\x1b[D", left, sizeof(left));
+	send_and_read(master, "\x1b", esc, sizeof(esc));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[1024];
+	shown_mode = "INSERT";
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 3);
+	TEST_ASSERT_EQUAL_STRING(expected, r2);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 4); /* after the c */
+	TEST_ASSERT_EQUAL_STRING(expected, r3);
+	TEST_ASSERT_EQUAL_STRING(expected, r4); /* right at the end: nothing moves, the screen is drawn again */
+	TEST_ASSERT_TRUE(n > 0);
+	screen(expected, sizeof(expected), "abc\r\ndef", 2, 4);
+	TEST_ASSERT_EQUAL_STRING(expected, down);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 4);
+	TEST_ASSERT_EQUAL_STRING(expected, up);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 3);
+	TEST_ASSERT_EQUAL_STRING(expected, left);
+	shown_mode = "NORMAL";
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 2); /* from column 2 (after Left) one left */
+	TEST_ASSERT_EQUAL_STRING(expected, esc);
+}
+
+/** @brief h, j, k, l do nothing in insert mode (no redraw); the arrows still do. */
+static void test_notvim_hjkl_do_nothing_in_insert_mode(void) {
+	const char *path = tmpdir_write("insignore.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], ins[1024], after[1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "i", ins, sizeof(ins));
+	size_t n = send_and_read(master, "hjkl", after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(0, n);
+}
+
+/** @brief The status line says "[No Name] INSERT" in insert mode, literally, and Ctrl+Q quits from insert mode. */
+static void test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode(void) {
+	int master;
+	char first[1024], ins[1024];
+	pid_t pid = spawn_notvim(NULL, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "i", ins, sizeof(ins));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_NOT_NULL(strstr(ins, "\x1b[24;1H\x1b[7m[No Name] INSERT"));
 }
 
 /** @brief An escape sequence that is not an arrow (Delete) is ignored and does not redraw. */
@@ -1681,6 +1783,10 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_arrow_keys_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_hjkl_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
+	RUN_TEST(test_notvim_i_and_esc_switch_modes);
+	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);
+	RUN_TEST(test_notvim_hjkl_do_nothing_in_insert_mode);
+	RUN_TEST(test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);
 	RUN_TEST(test_notvim_lone_escape_does_not_swallow_the_next_key);

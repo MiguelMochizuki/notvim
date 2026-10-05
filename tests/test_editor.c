@@ -10,6 +10,7 @@
 #include "unity.h"
 #include "test_editor.h"
 #include "editor.h"
+#include "keys.h"
 #include "tmpdir.h"
 #include "drawfmt.h"
 
@@ -2467,6 +2468,320 @@ static void test_editor_mode_label_is_normal(void) {
 	TEST_ASSERT_EQUAL_STRING("NORMAL", editor_mode_label(&e));
 }
 
+/** @brief Send each byte of @p keys to editor_handle_key() (a lone 'E' is KEY_ESC, 'U', 'D', 'L', 'R' are the arrows). */
+static void press(const char *keys) {
+	for (; *keys; keys++) {
+		int key = *keys;
+		switch (*keys) {
+		case 'E': key = KEY_ESC; break;
+		case 'U': key = KEY_UP; break;
+		case 'D': key = KEY_DOWN; break;
+		case 'L': key = KEY_LEFT; break;
+		case 'R': key = KEY_RIGHT; break;
+		}
+		editor_handle_key(&e, key);
+	}
+}
+
+/** @brief A fresh editor is in normal mode; i enters insert mode where the cursor is and asks for a redraw. */
+static void test_editor_i_enters_insert_mode_at_the_cursor(void) {
+	editor_init(&e);
+	append("abc");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	press("l");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'i'));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	assert_cursor(0, 1);
+	TEST_ASSERT_EQUAL_STRING("INSERT", editor_mode_label(&e));
+}
+
+/** @brief i works in an editor with no lines. */
+static void test_editor_i_on_an_empty_editor(void) {
+	editor_init(&e);
+	press("i");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	press("E");
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	assert_cursor(0, 0);
+}
+
+/** @brief Esc in normal mode does nothing and needs no redraw. */
+static void test_editor_esc_in_normal_mode_does_nothing(void) {
+	editor_init(&e);
+	append("abc");
+	press("l");
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, KEY_ESC));
+	assert_cursor(0, 1);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+}
+
+/** @brief Esc at column 0 leaves insert mode and the cursor stays (Vim: i, Esc, i, Y gives Yabc). */
+static void test_editor_esc_at_column_0_stays(void) {
+	editor_init(&e);
+	append("abc");
+	press("i");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, KEY_ESC));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	assert_cursor(0, 0);
+	TEST_ASSERT_EQUAL_STRING("NORMAL", editor_mode_label(&e));
+}
+
+/** @brief Esc in the middle of a line moves one character left and sets the wanted column (Vim: 3l, i, Esc is column 2). */
+static void test_editor_esc_in_the_middle_moves_left(void) {
+	editor_init(&e);
+	append("abcdef");
+	press("llli");
+	e.wantcol = 99;
+	press("E");
+	assert_cursor(0, 2);
+	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
+}
+
+/** @brief Esc after the last character lands on the last character (Vim: A, Esc, i, Y gives abYc). */
+static void test_editor_esc_after_the_last_character_lands_on_it(void) {
+	editor_init(&e);
+	append("abc");
+	press("lllR"); /* normal: stops on c */
+	assert_cursor(0, 2);
+	press("iRE");
+	assert_cursor(0, 2);
+	press("iRRE");
+	assert_cursor(0, 2);
+}
+
+/** @brief Esc on an empty line stays at column 0. */
+static void test_editor_esc_on_an_empty_line(void) {
+	editor_init(&e);
+	append("");
+	press("iE");
+	assert_cursor(0, 0);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+}
+
+/** @brief Esc steps over a whole multi-byte character, from its end and from the end of the line. */
+static void test_editor_esc_steps_over_a_multibyte_character(void) {
+	editor_init(&e);
+	append("a\xc3\xa9" "b"); /* a, e-acute (bytes 1-2), b (byte 3) */
+	press("lli"); /* on b */
+	assert_cursor(0, 3);
+	press("E");
+	assert_cursor(0, 1);
+	press("iRRE"); /* end of line (byte 4), then Esc on b */
+	assert_cursor(0, 3);
+}
+
+/** @brief Esc at column 0 still sets the wanted column to 0 (Vim: 3l, j onto an empty line, i, Esc, k goes to column 0). */
+static void test_editor_esc_at_column_0_sets_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("");
+	press("lllj");
+	TEST_ASSERT_EQUAL_UINT(3, e.wantcol);
+	press("iEk");
+	assert_cursor(0, 0);
+}
+
+/** @brief h, j, k, l and other keys do nothing in insert mode: no move, no redraw, no change of the text. */
+static void test_editor_hjkl_are_ignored_in_insert_mode(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	press("li");
+	const char *ignored = "hjklxiHJKL0 \n";
+	for (const char *k = ignored; *k; k++) TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, (unsigned char)*k));
+	assert_cursor(0, 1);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	assert_line(&e, 0, "abc");
+	assert_line(&e, 1, "def");
+}
+
+/** @brief In normal mode h, j, k, l and the arrows move and ask for a redraw. */
+static void test_editor_hjkl_and_arrows_work_in_normal_mode(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'l'));
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 'j'));
+	assert_cursor(1, 1);
+	press("hk");
+	assert_cursor(0, 0);
+	press("RD");
+	assert_cursor(1, 1);
+	press("LU");
+	assert_cursor(0, 0);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 'x'));
+}
+
+/** @brief The arrows move in insert mode and ask for a redraw. */
+static void test_editor_arrows_work_in_insert_mode(void) {
+	editor_init(&e);
+	append("abc");
+	append("def");
+	press("i");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, KEY_RIGHT));
+	press("D");
+	assert_cursor(1, 1);
+	press("LU");
+	assert_cursor(0, 0);
+}
+
+/** @brief In insert mode right goes to the end of the line (Vim: A-like, Right at the end stays) and left comes back from it. */
+static void test_editor_insert_right_reaches_the_end_of_the_line(void) {
+	editor_init(&e);
+	append("abc");
+	press("iRRR");
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(3, e.wantcol);
+	press("R");
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(3, e.wantcol);
+	press("L");
+	assert_cursor(0, 2);
+	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
+}
+
+/** @brief Left at column 0 and right on an empty line do not move in insert mode. */
+static void test_editor_insert_left_at_0_and_right_on_an_empty_line(void) {
+	editor_init(&e);
+	append("");
+	press("iLRL");
+	assert_cursor(0, 0);
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+}
+
+/** @brief A horizontal move in insert mode sets the wanted column, so a vertical one follows it. */
+static void test_editor_insert_horizontal_move_sets_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("abcdefgh");
+	append("abcdefgh");
+	press("iRRRRRRDRD"); /* end of line 0 (column 6), down to column 6, right, down: Vim puts the cursor at column 7 */
+	assert_cursor(2, 7);
+	TEST_ASSERT_EQUAL_UINT(7, e.wantcol);
+}
+
+/** @brief Down onto a shorter line goes to its end in insert mode, and up comes back to the wanted column (Vim: A on abcdef, Down gives abX). */
+static void test_editor_insert_down_onto_a_shorter_line_goes_to_its_end(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab");
+	append("abcdef");
+	press("iRRRRRRD");
+	assert_cursor(1, 2);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol); /* a vertical move keeps it */
+	press("D");
+	assert_cursor(2, 6); /* the end of the long line */
+	press("UU");
+	assert_cursor(0, 6);
+}
+
+/** @brief Up and down through an empty line in insert mode keep the wanted column. */
+static void test_editor_insert_vertical_through_an_empty_line(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("");
+	append("abcdef");
+	press("iRRRD");
+	assert_cursor(1, 0);
+	press("D");
+	assert_cursor(2, 3);
+	press("UU");
+	assert_cursor(0, 3);
+}
+
+/** @brief A wanted column past a shorter line puts the cursor on its end, but a column inside the last character picks it. */
+static void test_editor_insert_vertical_onto_a_line_ending_in_a_tab(void) {
+	editor_init(&e);
+	append("abcdefghijkl");
+	append("a\t"); /* tab: columns 1 to 7, the end of the line is column 8 */
+	press("iRRRRRRRD"); /* column 7 */
+	assert_cursor(1, 1);
+	press("U");
+	assert_cursor(0, 7);
+	press("R");
+	press("D"); /* column 8 */
+	assert_cursor(1, 2);
+	press("U");
+	assert_cursor(0, 8);
+}
+
+/** @brief The end of a line with a multi-byte character is at its display column, not its byte length (Vim: aé, A, Down onto aéb gives aéXb). */
+static void test_editor_insert_vertical_with_multibyte_text(void) {
+	editor_init(&e);
+	append("a\xc3\xa9");
+	append("a\xc3\xa9" "b");
+	press("iRR"); /* end of line 0: byte 3, column 2 */
+	assert_cursor(0, 3);
+	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
+	press("D");
+	assert_cursor(1, 3); /* before b */
+	press("L");
+	assert_cursor(1, 1);
+	press("U");
+	assert_cursor(0, 1);
+}
+
+/** @brief Esc after insert-mode moves keeps the wanted column (Vim: 4l, i, Left, Esc, j goes to column 2). */
+static void test_editor_esc_after_insert_moves_sets_the_wanted_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("abcdef");
+	press("llll"); /* column 4 */
+	press("iLE");
+	assert_cursor(0, 2);
+	press("D");
+	assert_cursor(1, 2);
+}
+
+/** @brief Esc from the end of a long line then down past a short one comes back to column 5 (Vim: A, Esc, j, j). */
+static void test_editor_esc_from_the_end_then_vertical(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("ab");
+	append("abcdef");
+	press("iRRRRRRE");
+	assert_cursor(0, 5);
+	press("jj");
+	assert_cursor(2, 5);
+}
+
+/** @brief The status line shows INSERT in insert mode and NORMAL again after Esc. */
+static void test_editor_status_shows_insert(void) {
+	editor_init(&e);
+	append("abc");
+	char out[128];
+	press("i");
+	editor_status(&e, 40, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING("[No Name] INSERT" "                     " "1,1", out);
+	press("E");
+	editor_status(&e, 40, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING("[No Name] NORMAL" "                     " "1,1", out);
+}
+
+/** @brief The status column and the drawn cursor sit after the last character in insert mode. */
+static void test_editor_insert_end_of_line_is_drawn_after_the_text(void) {
+	editor_init(&e);
+	append("abc");
+	press("iRRR");
+	char out[256];
+	editor_status(&e, 40, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING("[No Name] INSERT" "                     " "1,4", out);
+	char buf[512];
+	editor_draw_text(&e, 5, 40, buf, sizeof(buf));
+	TEST_ASSERT_NOT_NULL(strstr(buf, "\x1b[1;4H\x1b[?25h"));
+}
+
+/** @brief Loading a file or freeing the editor goes back to normal mode. */
+static void test_editor_free_and_load_return_to_normal_mode(void) {
+	editor_init(&e);
+	press("i");
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	press("i");
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, "no-such-dir/none.txt"));
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+}
+
 /** @brief A CRLF file shows [dos] after its name, before the mode label. */
 static void test_editor_status_shows_dos_for_a_crlf_file(void) {
 	editor_init(&e);
@@ -2956,6 +3271,30 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_load_of_its_own_path_works);
 	RUN_TEST(test_editor_status_of_an_empty_path_is_no_name);
 	RUN_TEST(test_editor_mode_label_is_normal);
+	RUN_TEST(test_editor_i_enters_insert_mode_at_the_cursor);
+	RUN_TEST(test_editor_i_on_an_empty_editor);
+	RUN_TEST(test_editor_esc_in_normal_mode_does_nothing);
+	RUN_TEST(test_editor_esc_at_column_0_stays);
+	RUN_TEST(test_editor_esc_in_the_middle_moves_left);
+	RUN_TEST(test_editor_esc_after_the_last_character_lands_on_it);
+	RUN_TEST(test_editor_esc_on_an_empty_line);
+	RUN_TEST(test_editor_esc_steps_over_a_multibyte_character);
+	RUN_TEST(test_editor_esc_at_column_0_sets_the_wanted_column);
+	RUN_TEST(test_editor_hjkl_are_ignored_in_insert_mode);
+	RUN_TEST(test_editor_hjkl_and_arrows_work_in_normal_mode);
+	RUN_TEST(test_editor_arrows_work_in_insert_mode);
+	RUN_TEST(test_editor_insert_right_reaches_the_end_of_the_line);
+	RUN_TEST(test_editor_insert_left_at_0_and_right_on_an_empty_line);
+	RUN_TEST(test_editor_insert_horizontal_move_sets_the_wanted_column);
+	RUN_TEST(test_editor_insert_down_onto_a_shorter_line_goes_to_its_end);
+	RUN_TEST(test_editor_insert_vertical_through_an_empty_line);
+	RUN_TEST(test_editor_insert_vertical_onto_a_line_ending_in_a_tab);
+	RUN_TEST(test_editor_insert_vertical_with_multibyte_text);
+	RUN_TEST(test_editor_esc_after_insert_moves_sets_the_wanted_column);
+	RUN_TEST(test_editor_esc_from_the_end_then_vertical);
+	RUN_TEST(test_editor_status_shows_insert);
+	RUN_TEST(test_editor_insert_end_of_line_is_drawn_after_the_text);
+	RUN_TEST(test_editor_free_and_load_return_to_normal_mode);
 	RUN_TEST(test_editor_status_shows_dos_for_a_crlf_file);
 	RUN_TEST(test_editor_status_shows_no_dos_for_other_files);
 	RUN_TEST(test_editor_status_dos_with_a_utf8_name_and_truncation);
