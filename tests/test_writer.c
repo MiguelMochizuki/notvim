@@ -473,6 +473,30 @@ static void test_command_wq_and_x_refuse_an_existing_other_file(void) {
 	assert_file(other, "xa\n", 3);
 }
 
+/** @brief ":w" on the buffer's own read-only file shows E45 and writes nothing; ":w!" writes and keeps the 0444 bits. */
+static void test_command_w_refuses_a_read_only_own_file(void) {
+	if (geteuid() == 0) TEST_IGNORE_MESSAGE("root can write read-only files");
+	char path[256], want[400];
+	snprintf(path, sizeof(path), "%s", tmpdir_write("ro.txt", "old\n"));
+	TEST_ASSERT_EQUAL_INT(0, chmod(path, 0444));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	type("ix\x1b:w\r");
+	assert_msg("E45: 'readonly' option is set (add ! to override)");
+	assert_file(path, "old\n", 4);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+	type(":wq\r");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	type(":w!\r");
+	assert_file(path, "xold\n", 5);
+	TEST_ASSERT_EQUAL_INT(0, e.modified);
+	snprintf(want, sizeof(want), "\"%s\" 1L, 5B written", path);
+	assert_msg(want);
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(0, stat(path, &st));
+	TEST_ASSERT_EQUAL_INT(0444, st.st_mode & 07777);
+}
+
 /** @brief An empty editor is saved as an empty file with "0L, 0B written". */
 static void test_command_w_empty_editor(void) {
 	char path[256], cmd[300], want[400];
@@ -772,6 +796,7 @@ void test_writer_suite(void) {
 	RUN_TEST(test_command_w_bang_overwrites_an_existing_other_file);
 	RUN_TEST(test_command_w_own_file_in_any_spelling_is_allowed);
 	RUN_TEST(test_command_wq_and_x_refuse_an_existing_other_file);
+	RUN_TEST(test_command_w_refuses_a_read_only_own_file);
 	RUN_TEST(test_command_w_empty_editor);
 	RUN_TEST(test_command_w_error_shows_strerror);
 	RUN_TEST(test_command_w_message_goes_with_the_next_key);

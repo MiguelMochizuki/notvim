@@ -26,7 +26,8 @@ static int same_file(const char *a, const char *b) {
 /**
  * @brief The ":w" command: write to the path of @p e or to the name in @p arg, and report; return 0 if it was written, -1 if not.
  *
- * As in Vim, without @p bang an existing file that is not the buffer's own is refused (E13).
+ * As in Vim, without @p bang an existing file that is not the buffer's own is refused (E13), and so is the buffer's own
+ * file when it is not writable by the user (E45).
  */
 static int cmd_write(editor_t *e, const char *arg, int bang) {
 	const char *path = arg[0] ? arg : e->path;
@@ -37,6 +38,10 @@ static int cmd_write(editor_t *e, const char *arg, int bang) {
 	int own = e->path && same_file(path, e->path);
 	if (!bang && !own && access(path, F_OK) == 0) {
 		say(e, "E13: File exists (add ! to override)");
+		return -1;
+	}
+	if (!bang && own && access(path, W_OK) != 0 && errno == EACCES) {
+		say(e, "E45: 'readonly' option is set (add ! to override)");
 		return -1;
 	}
 	int is_new = access(path, F_OK) != 0;

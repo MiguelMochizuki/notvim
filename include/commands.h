@@ -14,7 +14,10 @@
  * editor_write_file(): to the path of @p e, or to the name given, which becomes the path if @p e has none. Without '!',
  * a name that is an existing file other than the file of @p e (compared by device and inode, so links and spellings of
  * the own file are fine) is refused with "E13: File exists (add ! to override)" and nothing is written; with '!' it is
- * overwritten (the message and @c modified are as for any other name). Without a
+ * overwritten (the message and @c modified are as for any other name). Without '!' the file of @p e itself is also
+ * refused, with "E45: 'readonly' option is set (add ! to override)", when the user cannot write it (access(W_OK)
+ * fails with EACCES: a 0444 file; as root the check never fires); with '!' it is replaced and keeps its permission bits.
+ * Without a
  * path and without a name the message is "E32: No file name". Success sets the message
  * "\"name\" [New] 12L, 345B written" ("[New]" when the file did not exist, "[dos]" after it for a CRLF file) and,
  * when the file written is the file of @p e, clears @c modified (as in Vim, writing to another name does not). A failure

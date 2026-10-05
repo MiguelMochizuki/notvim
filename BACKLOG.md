@@ -110,7 +110,7 @@ Do these once insert mode and yank exist.
 - **H4.1** As user, I want to save with `:w`, so I don't lose my work
   - Design: `editor_write_file()` (`src/writer.c`) writes a temp file in the target directory (`mkstemp`), `fsync`, `rename`; the dispatcher is `commands_run()` in `src/commands.c`.
   - Decisions: LF only unless loaded as CRLF; a lone CR and invalid bytes are written as stored; a missing final newline is added (Vim does, checked); a symlink is written through.
-  - Decisions: `:w name` adopts the name only when there is no path, and writing to another name leaves `[+]`, as in Vim; message `"name" [New] [dos] 12L, 345B written`; `:w name` on another existing file is `E13` and `:w!` overrides it (Vim-checked; own file compared by inode).
+  - Decisions: `:w name` adopts the name only when there is no path, and writing to another name leaves `[+]`, as in Vim; message `"name" [New] [dos] 12L, 345B written`; `:w name` on another existing file is `E13` and `:w!` overrides it (Vim-checked; own file compared by inode); `:w` on a read-only own file is `E45`, `:w!` writes it and keeps the mode.
   - Known gaps: hard links are lost by the rename; no `fsync` of the directory; no backup file; owner and group of an existing file are not kept.
 
 ### H3 Insert mode
