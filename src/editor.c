@@ -2,6 +2,7 @@
  * @file editor.c
  * @brief Implementation of editor.h. Public symbols are documented there.
  */
+#include <stdlib.h>
 #include <string.h>
 #include "editor.h"
 
@@ -10,14 +11,61 @@ int editor_should_exit(char c) {
 }
 
 void editor_init(editor_t *e) {
-	memset(e->buffer, 0, sizeof(e->buffer));
-	e->len = 0;
+	e->lines = NULL;
+	e->count = 0;
+	e->cap = 0;
+}
+
+void editor_free(editor_t *e) {
+	for (size_t i = 0; i < e->count; i++) free(e->lines[i]);
+	free(e->lines);
+	editor_init(e);
+}
+
+size_t editor_line_count(const editor_t *e) {
+	return e->count;
+}
+
+const char *editor_line(const editor_t *e, size_t i) {
+	return i < e->count ? e->lines[i] : NULL;
+}
+
+int editor_append_line(editor_t *e, const char *text) {
+	size_t len = strlen(text);
+	char *copy = malloc(len + 1);
+	if (!copy) return -1;
+	memcpy(copy, text, len + 1);
+
+	if (e->count == e->cap) {
+		size_t cap = e->cap ? e->cap * 2 : 8;
+		char **lines = realloc(e->lines, cap * sizeof(*lines));
+		if (!lines) {
+			free(copy);
+			return -1;
+		}
+		e->lines = lines;
+		e->cap = cap;
+	}
+	e->lines[e->count++] = copy;
+	return 0;
+}
+
+/** @brief Copy up to @p len bytes of @p src to @p out at *pos without passing @p max. */
+static void put(char *out, size_t *pos, size_t max, const char *src, size_t len) {
+	size_t room = max - *pos;
+	size_t n = len < room ? len : room;
+	memcpy(out + *pos, src, n);
+	*pos += n;
 }
 
 size_t editor_render(const editor_t *e, char *out, size_t out_size) {
 	if (out_size == 0) return 0;
-	size_t n = e->len < out_size - 1 ? e->len : out_size - 1;
-	memcpy(out, e->buffer, n);
-	out[n] = '\0';
-	return n;
+	size_t max = out_size - 1; /* room for the NUL */
+	size_t pos = 0;
+	for (size_t i = 0; i < e->count; i++) {
+		if (i > 0) put(out, &pos, max, "\r\n", 2);
+		put(out, &pos, max, e->lines[i], strlen(e->lines[i]));
+	}
+	out[pos] = '\0';
+	return pos;
 }

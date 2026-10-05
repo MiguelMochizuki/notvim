@@ -2,6 +2,7 @@
  * @file test_editor.c
  * @brief Unit tests for editor.c.
  */
+#include <stdio.h>
 #include <string.h>
 #include "unity.h"
 #include "test_editor.h"
@@ -19,70 +20,215 @@ static void test_editor_should_not_exit_on_other_keys(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_should_exit('q'));
 }
 
-/** @brief editor_init() zeroes the buffer and length. */
-static void test_editor_init_zeroes_buffer(void) {
-	editor_t e;
-	memset(&e, 0xFF, sizeof(e));
-	editor_init(&e);
-	TEST_ASSERT_EQUAL_INT(0, e.len);
-	TEST_ASSERT_EQUAL_INT(0, e.buffer[0]);
-	TEST_ASSERT_EQUAL_INT(0, e.buffer[EDITOR_BUFFER_SIZE - 1]);
+/** @brief Assert that line @p i of @p e equals @p expected. */
+static void assert_line(const editor_t *e, size_t i, const char *expected) {
+	TEST_ASSERT_NOT_NULL(editor_line(e, i));
+	TEST_ASSERT_EQUAL_STRING(expected, editor_line(e, i));
 }
 
-/** @brief Rendering an empty buffer yields an empty string. */
-static void test_editor_render_empty_buffer(void) {
+/** @brief A fresh editor has no lines. */
+static void test_editor_init_is_empty(void) {
 	editor_t e;
 	editor_init(&e);
-	char out[256];
-	size_t n = editor_render(&e, out, sizeof(out));
-	TEST_ASSERT_EQUAL_INT(0, n);
-	TEST_ASSERT_EQUAL_INT(0, out[0]);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_NULL(editor_line(&e, 0));
+	editor_free(&e);
 }
 
-/** @brief Rendering "abc" copies it and returns 3. */
-static void test_editor_render_abc(void) {
+/** @brief Appending one line gives a count of 1 and the same text. */
+static void test_editor_append_one_line(void) {
 	editor_t e;
 	editor_init(&e);
-	memcpy(e.buffer, "abc", 3);
-	e.len = 3;
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "hello"));
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "hello");
+	editor_free(&e);
+}
+
+/** @brief Several appends keep their order. */
+static void test_editor_append_keeps_order(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "one"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "two"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "three"));
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "one");
+	assert_line(&e, 1, "two");
+	assert_line(&e, 2, "three");
+	editor_free(&e);
+}
+
+/** @brief Append copies the text: changing the source later does not affect the editor. */
+static void test_editor_append_copies_text(void) {
+	editor_t e;
+	editor_init(&e);
+	char src[] = "abc";
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, src));
+	src[0] = 'X';
+	assert_line(&e, 0, "abc");
+	editor_free(&e);
+}
+
+/** @brief Appending "" adds a blank line. */
+static void test_editor_append_empty_string_is_a_line(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 1, "");
+	editor_free(&e);
+}
+
+/** @brief 100 appends (past any initial capacity) all stay intact. */
+static void test_editor_append_many_lines_grows(void) {
+	editor_t e;
+	editor_init(&e);
+	char text[16];
+	for (int i = 0; i < 100; i++) {
+		snprintf(text, sizeof(text), "line %d", i);
+		TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, text));
+	}
+	TEST_ASSERT_EQUAL_UINT(100, editor_line_count(&e));
+	for (int i = 0; i < 100; i++) {
+		snprintf(text, sizeof(text), "line %d", i);
+		assert_line(&e, (size_t)i, text);
+	}
+	editor_free(&e);
+}
+
+/** @brief A line far longer than the render buffer is stored whole. */
+static void test_editor_append_long_line_is_not_truncated(void) {
+	editor_t e;
+	editor_init(&e);
+	char text[5001]; /* on the stack: a failed assert must not leak it */
+	memset(text, 'a', 5000);
+	text[5000] = '\0';
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, text));
+	TEST_ASSERT_EQUAL_UINT(5000, strlen(editor_line(&e, 0)));
+	assert_line(&e, 0, text);
+	editor_free(&e);
+}
+
+/** @brief editor_line() returns NULL for an index past the last line. */
+static void test_editor_line_out_of_range_is_null(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_NULL(editor_line(&e, 1));
+	TEST_ASSERT_NULL(editor_line(&e, 1000));
+	editor_free(&e);
+}
+
+/** @brief After editor_free() the editor is empty and can be used again. */
+static void test_editor_free_resets_and_allows_reuse(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	assert_line(&e, 0, "b");
+	editor_free(&e);
+}
+
+/** @brief editor_free() is safe on a fresh editor and when called twice. */
+static void test_editor_free_is_safe_when_empty_or_repeated(void) {
+	editor_t e;
+	editor_init(&e);
+	editor_free(&e);
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+}
+
+/** @brief Rendering an editor with no lines yields an empty string. */
+static void test_editor_render_no_lines(void) {
+	editor_t e;
+	editor_init(&e);
+	char out[256] = "garbage";
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("", out);
+	editor_free(&e);
+}
+
+/** @brief Rendering one line copies it and returns its length. */
+static void test_editor_render_one_line(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[256];
-	size_t n = editor_render(&e, out, sizeof(out));
-	TEST_ASSERT_EQUAL_INT(3, n);
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
+	editor_free(&e);
+}
+
+/** @brief Lines are joined with "\r\n" and there is no trailing separator. */
+static void test_editor_render_joins_lines_with_crlf(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(6, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("a\r\n\r\nb", out);
+	editor_free(&e);
 }
 
 /** @brief Rendering truncates to out_size - 1 and stays NUL-terminated. */
 static void test_editor_render_truncates_on_small_buffer(void) {
 	editor_t e;
 	editor_init(&e);
-	memcpy(e.buffer, "abcdef", 6);
-	e.len = 6;
-	char out[4];  /* 3 chars + '\0' */
-	size_t n = editor_render(&e, out, sizeof(out));
-	TEST_ASSERT_EQUAL_INT(3, n);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abcdef"));
+	char out[4]; /* 3 chars + '\0' */
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
+	editor_free(&e);
+}
+
+/** @brief Truncation can cut in the middle of the "\r\n" separator. */
+static void test_editor_render_truncates_across_lines(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "ab"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "cd"));
+	char out[5]; /* "ab\r\n" would need 4 chars + '\0'; "cd" is cut off */
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("ab\r\n", out);
+	editor_free(&e);
 }
 
 /** @brief Rendering with out_size 0 returns 0 and leaves out untouched. */
 static void test_editor_render_zero_size_returns_zero(void) {
 	editor_t e;
 	editor_init(&e);
-	memcpy(e.buffer, "abc", 3);
-	e.len = 3;
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[1] = { 'x' };
-	size_t n = editor_render(&e, out, 0);
-	TEST_ASSERT_EQUAL_INT(0, n);
-	/* out must not be touched */
-	TEST_ASSERT_EQUAL_INT('x', out[0]);
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, out, 0));
+	TEST_ASSERT_EQUAL_INT('x', out[0]); /* out must not be touched */
+	editor_free(&e);
 }
 
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
 	RUN_TEST(test_editor_should_not_exit_on_other_keys);
-	RUN_TEST(test_editor_init_zeroes_buffer);
-	RUN_TEST(test_editor_render_empty_buffer);
-	RUN_TEST(test_editor_render_abc);
+	RUN_TEST(test_editor_init_is_empty);
+	RUN_TEST(test_editor_append_one_line);
+	RUN_TEST(test_editor_append_keeps_order);
+	RUN_TEST(test_editor_append_copies_text);
+	RUN_TEST(test_editor_append_empty_string_is_a_line);
+	RUN_TEST(test_editor_append_many_lines_grows);
+	RUN_TEST(test_editor_append_long_line_is_not_truncated);
+	RUN_TEST(test_editor_line_out_of_range_is_null);
+	RUN_TEST(test_editor_free_resets_and_allows_reuse);
+	RUN_TEST(test_editor_free_is_safe_when_empty_or_repeated);
+	RUN_TEST(test_editor_render_no_lines);
+	RUN_TEST(test_editor_render_one_line);
+	RUN_TEST(test_editor_render_joins_lines_with_crlf);
 	RUN_TEST(test_editor_render_truncates_on_small_buffer);
+	RUN_TEST(test_editor_render_truncates_across_lines);
 	RUN_TEST(test_editor_render_zero_size_returns_zero);
 }

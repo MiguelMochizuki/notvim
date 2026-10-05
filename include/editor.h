@@ -7,13 +7,14 @@
 
 #include <stddef.h>
 
-/** Capacity of the editor buffer in bytes, including the terminating NUL. */
+/** Size in bytes of the buffer main() uses to render the screen. */
 #define EDITOR_BUFFER_SIZE 1024
 
-/** Editor state: a single-line text buffer. */
+/** Editor state: the text as a growable array of lines. */
 typedef struct {
-	char buffer[EDITOR_BUFFER_SIZE]; /**< Buffer contents (not necessarily NUL-terminated). */
-	size_t len;                      /**< Number of bytes in use in @ref buffer. */
+	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
+	size_t count; /**< Number of lines in use in @ref lines. */
+	size_t cap;   /**< Allocated capacity of @ref lines, in lines. */
 } editor_t;
 
 /**
@@ -24,15 +25,51 @@ typedef struct {
 int editor_should_exit(char c);
 
 /**
- * @brief Reset @p e to an empty buffer.
- * @param e Editor to initialise; must not be NULL.
+ * @brief Initialise @p e as an empty editor with no lines. Does not allocate.
+ * @param e Editor to initialise; must not be NULL and is not read first.
  */
 void editor_init(editor_t *e);
 
 /**
- * @brief Copy the buffer into @p out as a NUL-terminated string.
+ * @brief Free every line and leave @p e as after editor_init().
  *
- * Output is truncated to fit @p out_size, leaving room for the NUL.
+ * Safe on a freshly initialised editor and safe to call twice; @p e can be
+ * reused afterwards.
+ *
+ * @param e Editor to free; must have been passed to editor_init().
+ */
+void editor_free(editor_t *e);
+
+/**
+ * @brief Number of lines in @p e.
+ * @param e Editor to query; must not be NULL.
+ * @return Line count; 0 for an empty editor.
+ */
+size_t editor_line_count(const editor_t *e);
+
+/**
+ * @brief Get line @p i of @p e.
+ * @param e Editor to query; must not be NULL.
+ * @param i Zero-based line index.
+ * @return The NUL-terminated line, valid until the editor is next modified or
+ *         freed; NULL if @p i is out of range.
+ */
+const char *editor_line(const editor_t *e, size_t i);
+
+/**
+ * @brief Append a copy of @p text as a new last line of @p e.
+ * @param e    Editor to modify; must not be NULL.
+ * @param text NUL-terminated line without a newline; "" appends a blank line.
+ * @return 0 on success, -1 on failure (errno is ENOMEM); @p e is unchanged on failure.
+ */
+int editor_append_line(editor_t *e, const char *text);
+
+/**
+ * @brief Render all lines into @p out as a NUL-terminated string.
+ *
+ * Lines are joined with "\r\n" (no trailing separator), because raw mode
+ * turns off output processing. Output is truncated to fit @p out_size,
+ * leaving room for the NUL.
  *
  * @param e        Editor to render; must not be NULL.
  * @param out      Destination buffer.

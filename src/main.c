@@ -34,5 +34,6 @@ int main(void) {
 		}
 	}
 
+	editor_free(&e);
 	return 0;
 }
