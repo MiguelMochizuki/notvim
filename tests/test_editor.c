@@ -3715,9 +3715,9 @@ static void test_editor_enter_on_an_empty_command_does_nothing(void) {
 	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
 }
 
-/** @brief Every non-empty command, known or not, shows E492 with the text as typed, and the mode goes back to normal. */
-static void test_editor_every_command_shows_e492_for_now(void) {
-	const char *cmds[] = { "x", "w", "w!", "q", "q!", "wq", "w name", "zz" };
+/** @brief Every non-empty command that is not :w shows E492 with the text as typed, and the mode goes back to normal. */
+static void test_editor_every_other_command_shows_e492_for_now(void) {
+	const char *cmds[] = { "x", "q", "q!", "wq", "zz", "writ" };
 	for (size_t i = 0; i < sizeof(cmds) / sizeof(*cmds); i++) {
 		editor_init(&e);
 		append("t");
@@ -4188,7 +4188,7 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_command_ignores_other_keys);
 	RUN_TEST(test_editor_command_line_is_bounded);
 	RUN_TEST(test_editor_enter_on_an_empty_command_does_nothing);
-	RUN_TEST(test_editor_every_command_shows_e492_for_now);
+	RUN_TEST(test_editor_every_other_command_shows_e492_for_now);
 	RUN_TEST(test_editor_the_next_key_clears_the_message);
 	RUN_TEST(test_editor_set_message_replaces_and_free_drops);
 	RUN_TEST(test_editor_colon_in_insert_mode_is_a_colon);

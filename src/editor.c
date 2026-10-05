@@ -8,6 +8,7 @@
 #include <string.h>
 #include <errno.h>
 #include "editor.h"
+#include "commands.h"
 #include "keys.h"
 #include "utf8.h"
 
@@ -475,16 +476,12 @@ static int cmd_backspace(editor_t *e) {
 	return 1;
 }
 
-/** @brief Enter in command mode: run the command and go back to normal mode. For now no command has behaviour: every non-empty one is an error. */
+/** @brief Enter in command mode: run the command and go back to normal mode. */
 static int cmd_enter(editor_t *e) {
-	cmd_t cmd;
-	cmd_parse(e->cmd.text, &cmd);
-	if (cmd.name[0] || cmd.bang || cmd.arg[0]) {
-		char msg[CMDLINE_MAX + 40];
-		snprintf(msg, sizeof(msg), "E492: Not an editor command: %s", e->cmd.text);
-		editor_set_message(e, msg); /* out of memory: no message */
-	}
+	char text[CMDLINE_MAX + 1];
+	memcpy(text, e->cmd.text, sizeof(text)); /* commands_run() may not see the command line change under it */
 	cmd_leave(e);
+	commands_run(e, text);
 	return 1;
 }
 

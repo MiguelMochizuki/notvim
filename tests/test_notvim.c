@@ -1926,6 +1926,74 @@ static void test_notvim_command_line_survives_a_resize(void) {
 	TEST_ASSERT_EQUAL_STRING(want, o2);
 }
 
+/** @brief Edit a file (created with @p content) by typing "x" at the start, save with :w, and check that its bytes on disk are the @p want_len bytes of @p want and that the screen says "written". */
+static void check_edit_and_save(const char *name, const char *content, const char *want, size_t want_len) {
+	char path[256], buf[256];
+	snprintf(path, sizeof(path), "%s", tmpdir_write(name, content));
+	int master;
+	char first[2048], o1[2048], o2[2048], o3[2048], o4[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "ix", o1, sizeof(o1));
+	send_and_read(master, "\x1b", o2, sizeof(o2));
+	send_and_read(master, ":w\r", o3, sizeof(o3));
+	send_and_read(master, "j", o4, sizeof(o4));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_NOT_NULL_MESSAGE(strstr(o3, " written"), "the message says written");
+	TEST_ASSERT_NOT_NULL_MESSAGE(strstr(o3, path), "the message names the file");
+	TEST_ASSERT_NULL_MESSAGE(strstr(o4, " written"), "the message goes with the next key");
+	TEST_ASSERT_NULL_MESSAGE(strstr(o4, "[+]"), "the file is no longer modified");
+	FILE *f = fopen(path, "rb");
+	TEST_ASSERT_NOT_NULL(f);
+	size_t n = fread(buf, 1, sizeof(buf), f);
+	fclose(f);
+	TEST_ASSERT_EQUAL_UINT(want_len, n);
+	TEST_ASSERT_EQUAL_MEMORY(want, buf, want_len);
+}
+
+/** @brief Typing into a loaded LF file and :w saves it with LF only. */
+static void test_notvim_w_saves_an_lf_file_without_cr(void) {
+	check_edit_and_save("save_lf.txt", "ab\ncd\n", "xab\ncd\n", 7);
+}
+
+/** @brief Typing into a loaded CRLF file and :w keeps the CRLF line endings. */
+static void test_notvim_w_keeps_a_crlf_file_crlf(void) {
+	check_edit_and_save("save_crlf.txt", "ab\r\ncd\r\n", "xab\r\ncd\r\n", 9);
+}
+
+/** @brief Without a file name :w shows E32; ":w <path>" then creates the file and shows [New]. */
+static void test_notvim_w_without_a_name_and_with_one(void) {
+	char path[256], cmd[300], buf[64];
+	snprintf(path, sizeof(path), "%s", tmpdir_path("created.txt"));
+	snprintf(cmd, sizeof(cmd), ":w %s\r", path);
+	int master;
+	static char o4[65536]; /* every typed character of the long command redraws the screen */
+	char first[2048], o1[2048], o2[2048], o3[2048];
+	pid_t pid = spawn_notvim(NULL, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "ihi", o1, sizeof(o1));
+	send_and_read(master, "\x1b", o2, sizeof(o2));
+	send_and_read(master, ":w\r", o3, sizeof(o3));
+	send_and_read(master, cmd, o4, sizeof(o4));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_NOT_NULL(strstr(o3, "E32: No file name"));
+	TEST_ASSERT_NOT_NULL(strstr(o4, "[New] 1L, 3B written"));
+	FILE *f = fopen(path, "rb");
+	TEST_ASSERT_NOT_NULL(f);
+	size_t n = fread(buf, 1, sizeof(buf), f);
+	fclose(f);
+	TEST_ASSERT_EQUAL_UINT(3, n);
+	TEST_ASSERT_EQUAL_MEMORY("hi\n", buf, 3);
+}
+
 void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_binary_enters_raw_and_quits_on_ctrl_q);
 	RUN_TEST(test_notvim_shows_file_lines);
@@ -2003,4 +2071,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_command_line_error_message_and_next_key);
 	RUN_TEST(test_notvim_command_line_esc_and_backspace_cancel);
 	RUN_TEST(test_notvim_command_line_survives_a_resize);
+	RUN_TEST(test_notvim_w_saves_an_lf_file_without_cr);
+	RUN_TEST(test_notvim_w_keeps_a_crlf_file_crlf);
+	RUN_TEST(test_notvim_w_without_a_name_and_with_one);
 }

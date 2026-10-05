@@ -12,6 +12,7 @@
 #include "test_winch.h"
 #include "test_utf8.h"
 #include "test_tmpdir.h"
+#include "test_writer.h"
 #include "tmpdir.h"
 
 /** @brief Unity hook run before each test; creates the temporary directory. */
@@ -19,6 +20,7 @@ void setUp(void) { tmpdir_create(); }
 /** @brief Unity hook run after each test, even a failed one; frees the shared editor and removes the temporary directory. */
 void tearDown(void) {
 	test_editor_teardown();
+	test_writer_teardown();
 	tmpdir_destroy();
 }
 
@@ -32,6 +34,7 @@ int main(void) {
 	test_winch_suite();
 	test_utf8_suite();
 	test_terminal_suite();
+	test_writer_suite();
 	test_notvim_suite();
 	test_tmpdir_suite();
 	return UNITY_END();
