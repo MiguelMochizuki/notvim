@@ -25,6 +25,9 @@ Requires a C11 compiler (gcc or clang), make, and libutil (for pty tests).
 Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
 `make test`; `make clean && make SAN=` builds without them.
 
+When a test fails, a leak report from the sanitizer can hide the test output;
+run `ASAN_OPTIONS=detect_leaks=0 ./test_runner` to read the results.
+
 ## Usage
 
 ```bash
@@ -35,6 +38,19 @@ With a file, its first lines (as many as fit the terminal) are shown; a missing
 file starts an empty buffer, and a file that cannot be read prints an error and
 exits with status 1. The editor then waits for `Ctrl+Q`.
 More will come as histories land.
+
+## Layout
+
+- `src/main.c`: entry point (argument, raw mode, first render, wait for `Ctrl+Q`).
+- `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
+  loading a file, rendering up to a number of rows.
+- `src/terminal.c`, `include/terminal.h`: raw mode and terminal size.
+- `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
+  the built `./notvim` on a pty, and `tmpdir.c`, a per-test temporary directory.
+  `tests/unity/` is vendored.
+
+Design decisions and the history of the refactors are recorded in
+[BACKLOG.md](BACKLOG.md).
 
 ## Documentation convention
 
@@ -49,8 +65,8 @@ Every `.c` and `.h` file starts with `@file` and `@brief`.
 
 ```c
 /**
- * @brief Reset @p e to an empty buffer.
- * @param e Editor to initialise; must not be NULL.
+ * @brief Initialise @p e as an empty editor with no lines. Does not allocate.
+ * @param e Editor to initialise; must not be NULL and is not read first.
  */
 void editor_init(editor_t *e);
 ```
