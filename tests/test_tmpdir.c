@@ -59,6 +59,17 @@ static void test_tmpdir_write_overwrites(void) {
 	TEST_ASSERT_EQUAL_STRING("second", buf);
 }
 
+/** @brief tmpdir_write_bytes() keeps NUL bytes: the file has every byte that was given. */
+static void test_tmpdir_write_bytes_keeps_nul_bytes(void) {
+	const char data[] = { 'a', '\0', 'b', '\n' };
+	const char *p = tmpdir_write_bytes("nul.bin", data, sizeof(data));
+	TEST_ASSERT_NOT_NULL(p);
+	char buf[16];
+	TEST_ASSERT_EQUAL_INT(4, read_file(p, buf, sizeof(buf)));
+	TEST_ASSERT_EQUAL_MEMORY(data, buf, 4);
+	TEST_ASSERT_NULL(tmpdir_write_bytes("../escape.bin", data, sizeof(data))); /* no subdirectories */
+}
+
 /** @brief tmpdir_path() only builds a path; it does not create anything. */
 static void test_tmpdir_path_does_not_create(void) {
 	struct stat st;
@@ -164,6 +175,7 @@ void test_tmpdir_suite(void) {
 	RUN_TEST(test_tmpdir_write_stores_exact_content);
 	RUN_TEST(test_tmpdir_write_empty_content_creates_empty_file);
 	RUN_TEST(test_tmpdir_write_overwrites);
+	RUN_TEST(test_tmpdir_write_bytes_keeps_nul_bytes);
 	RUN_TEST(test_tmpdir_path_does_not_create);
 	RUN_TEST(test_tmpdir_destroy_removes_everything);
 	RUN_TEST(test_tmpdir_destroy_twice_is_safe);

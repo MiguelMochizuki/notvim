@@ -58,12 +58,17 @@ const char *tmpdir_path(const char *name) {
 	return path;
 }
 
-const char *tmpdir_write(const char *name, const char *content) {
+const char *tmpdir_write_bytes(const char *name, const char *data, size_t len) {
+	if (strchr(name, '/')) return NULL; /* never write outside the directory */
 	const char *path = tmpdir_path(name);
 	if (!path) return NULL;
 	FILE *f = fopen(path, "w");
 	if (!f) return NULL;
-	int failed = fputs(content, f) == EOF;
+	int failed = fwrite(data, 1, len, f) != len;
 	if (fclose(f) == EOF) failed = 1;
 	return failed ? NULL : path;
+}
+
+const char *tmpdir_write(const char *name, const char *content) {
+	return tmpdir_write_bytes(name, content, strlen(content));
 }

@@ -14,6 +14,8 @@
 #ifndef TMPDIR_H
 #define TMPDIR_H
 
+#include <stddef.h>
+
 /**
  * @brief Create a fresh, empty temporary directory.
  *
@@ -40,6 +42,17 @@ void tmpdir_destroy(void);
  *         overwrites; NULL if the directory is missing or the write failed.
  */
 const char *tmpdir_write(const char *name, const char *content);
+
+/**
+ * @brief Like tmpdir_write(), but for @p len bytes that may contain NUL.
+ *
+ * @param name Name of the file to create, as in tmpdir_write(); a name with a
+ *             '/' is refused (NULL) so that nothing is written outside the directory.
+ * @param data Bytes to write.
+ * @param len  Number of bytes in @p data.
+ * @return Full path of the file, with the same rules as tmpdir_write().
+ */
+const char *tmpdir_write_bytes(const char *name, const char *data, size_t len);
 
 /**
  * @brief Full path of @p name inside the temporary directory, without creating it.
