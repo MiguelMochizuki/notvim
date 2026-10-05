@@ -22,7 +22,10 @@ Keys:
 | `←` `↓` `↑` `→` | Move the cursor (it never wraps; in insert mode it can go after the last character of a line) |
 | `h` `j` `k` `l` | The same, in normal mode only (in insert mode they are typed) |
 | `i` | Enter insert mode at the cursor |
-| Any printable key, `Tab` | In insert mode: type it at the cursor (accented and other UTF-8 characters too; `Enter` and `Backspace` come next) |
+| Any printable key, `Tab` | In insert mode: type it at the cursor (accented and other UTF-8 characters too) |
+| `Enter` | In insert mode: split the line at the cursor |
+| `Backspace` | In insert mode: delete the character before the cursor; at the start of a line, join it to the previous one |
+| `Delete` | In insert mode: delete the character under the cursor; at the end of a line, join the next one |
 | `Esc` | Leave insert mode, one character left unless at column 0 |
 | `Ctrl+Q` | Quit |
 
@@ -34,9 +37,9 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing |
-| In progress | `Backspace` and `Enter` in insert mode |
-| Editing core | saving with `:w`, quitting with `:q` and `:q!` |
+| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete` |
+| In progress | saving with `:w` |
+| Editing core | quitting with `:q` and `:q!` |
 | Navigation | Scrolling long lines horizontally; double-width characters |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
