@@ -170,6 +170,11 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
 	return pos;
 }
 
+/** @brief Drop the last byte, a CR, of each of the first @p n lines of @p e. Every one of them must end in a CR. */
+static void drop_crs(editor_t *e, size_t n) {
+	for (size_t i = 0; i < n; i++) e->lines[i][strlen(e->lines[i]) - 1] = '\0';
+}
+
 int editor_load_file(editor_t *e, const char *path) {
 	editor_free(e); /* drop any previous contents */
 
@@ -204,9 +209,9 @@ int editor_load_file(editor_t *e, const char *path) {
 	}
 	if (rc == 0 && ferror(fp)) rc = -1;
 	if (rc == 0 && terminated > 0 && all_cr) {
-		/* the whole file has been seen: it is CRLF, so drop the CR of each terminated line (not of a last line without newline) */
+		/* the whole file has been seen: it is CRLF */
 		e->crlf = 1;
-		for (size_t i = 0; i < e->count - (last_terminated ? 0 : 1); i++) e->lines[i][strlen(e->lines[i]) - 1] = '\0';
+		drop_crs(e, e->count - (last_terminated ? 0 : 1));
 	}
 
 	int saved = errno;
