@@ -2,8 +2,7 @@
 
 ## In progress
 
-- H1.4: As user, I want to run `notvim file.txt` and see all its lines, up to the terminal height, so I can read the file
-> Notice: merges former H1.4 (first line) and H1.5 (all lines). Requires a multi-line buffer and the terminal size (`TIOCGWINSZ`); changes `editor_t` and `editor_render`. A nonexistent path opens an empty buffer; the file is only created by `:w` (H4.1), as in Vim.
+(nothing in progress)
 
 ## To do
 
@@ -28,4 +27,17 @@
 > Solves Notice (H1.1)
 - H1.3: As user, I want to see buffer content at my screen, so I can know what I am editing
 - H0.4: As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
-> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
+> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` (now `terminal_set_raw_flags`, see H0.5) documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
+- H0.5: As dev, I want terminal code separated from editor code and covered by regression tests, so that raw mode and terminal size live in one module and refactors are safe
+> Notice (H0.5): regression tests added first (enter twice, leave twice, leave without enter, and a pty test that runs `./notvim` and quits with `Ctrl+Q`); `make test` now builds `notvim` first. Then `editor_enter_raw`/`editor_leave_raw`/`editor_set_raw_flags` moved to `terminal.c` as `terminal_*`, the unused `editor_version` was deleted, and tests were split into `test_editor.c`, `test_terminal.c` and `test_notvim.c`. The pty test cannot check "terminal restored": Linux resets a pty's attributes when the last slave closes.
+- H0.6: As dev, I want builds and tests to run under AddressSanitizer and UBSan, so that leaks and memory errors fail `make test` from the beginning
+> Notice (H0.6): `SAN` variable in the Makefile, on by default; `make clean && make SAN=` turns it off. Valgrind was considered and dropped: it cannot run together with ASan and adds little here.
+- H0.7: As dev, I want a per-test temporary directory helper, so that file-based tests never touch the repo and always clean up
+> Notice (H0.7): `tests/tmpdir.c`, created in `setUp` and removed in `tearDown` (which runs after a failed assertion), also at `exit()` and after `SIGINT`/`SIGTERM` (the handler only sets a flag; cleanup happens outside it, because `nftw` is not async-signal-safe). Not covered: crashes, ASan aborts and `SIGKILL` leave the directory in `/tmp`.
+- H0.8: As dev, I want the editor text stored as a growable array of lines, so that files of any size load without truncation
+> Notice (H0.8): fixed limits were rejected because loading a long file and saving it with `:w` (H4.1) would silently destroy data. `editor_t` is `char **lines` + `count` + `cap`; `editor_append_line` copies the text and leaves the editor unchanged on failure; `editor_free` is safe to call twice. No gap buffer or undo structure (YAGNI). An empty editor has 0 lines, not 1: an empty file round-trips as 0 bytes and `"\n"` as one empty line.
+- H1.4: As user, I want to run `notvim file.txt` and see all its lines, up to the terminal height, so I can read the file
+> Notice (H1.4): merges former H1.4 (first line) and H1.5 (all lines).
+> Decisions: a missing file gives an empty editor and is not created until `:w` (H4.1), as in Vim; any other open or read error makes `editor_load_file` return -1 with `errno` set and an empty editor, and `notvim` prints `notvim: <path>: <reason>` and exits 1 before entering raw mode, so the message shows on a normal terminal. A final newline does not add an empty line. CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line).
+> Decisions: lines are rendered joined by `\r\n` because raw mode clears `OPOST`, so a bare `\n` would not return to column 0; an OS-dependent line ending macro was discussed and not added (UNIX only). The terminal size is read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0); there is no `SIGWINCH` handling. The render buffer is sized `rows * (cols + 2) + 1`; lines longer than the terminal are not clipped and use up the room of the rows after them (`ponytail:` comment in `main.c`).
+> Known gaps: the out-of-memory path of `editor_load_file` and the cleanup after a read error halfway through a file are not tested. A failing editor test skips its `editor_free`, so ASan prints a leak report that hides Unity's output; run `ASAN_OPTIONS=detect_leaks=0 ./test_runner` to read the results.
