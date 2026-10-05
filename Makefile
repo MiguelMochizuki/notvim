@@ -26,7 +26,7 @@ notvim: $(OBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-test: test_runner
+test: notvim test_runner
 	./test_runner
 
 test_runner: $(OBJS_LIB) $(TEST_OBJS) $(UNITY_OBJS)
