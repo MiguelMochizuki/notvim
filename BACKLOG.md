@@ -24,6 +24,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - The last terminal row becomes the status line; the text window is `rows - 1` (`editor_scroll`, `draw`, `editor_render` already take the row count). `main` uses the full terminal height today (a gap noted in H2.3).
   - Content: file name (or `[No Name]`), mode label (`NORMAL` until H3.1), and `line,col` with the display column. Truncated to the terminal width without cutting a character.
   - `editor_load_file` remembers the path in the editor (H4.1 needs it to save).
+  - A CRLF file shows `[dos]` after the file name (the `crlf` flag of H6.9), so a line-ending style is never a surprise on Linux, where LF is the norm.
   - Known to check: the status row must not trigger the pending-wrap problem of H6.11 (a full-width status line has no `ESC[K`).
 
 ## To do
@@ -45,6 +46,7 @@ Where a story is "as Vim does", the behaviour is checked against the real Vim in
   - A missing file is created here, not on load (H1.4).
   - An editor with 0 lines saves as an empty file, and one empty line as `"\n"` (H0.8).
   - Loading never truncates, so saving a long file must write every line (H0.8).
+  - Linux default: a new file and any file that is not CRLF are saved with LF only, a CR is never added; only a file loaded as CRLF is written back with CRLF. Never convert silently.
   - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
 - **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
 
@@ -109,6 +111,8 @@ Each story below was reproduced against the real binary on a pty or found by a r
 - **H10.3** As user, I want `:s` and `:%s` to substitute text
 - **H10.4** As user, I want `:set number` to show line numbers
 - **H10.5** As user, I want `:e file`, `:w file`, `:wq`, `:x` and `ZZ`
+- **H10.6** As user, I want `:set fileformat=unix` (and `dos`, and `:set fileformat?`) to convert the line endings on purpose, as in Vim, so a CRLF file can become LF
+  - It changes the `crlf` flag and marks the buffer modified; the next `:w` writes the new style. Check the exact behaviour against the real Vim.
 
 ### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
 

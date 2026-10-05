@@ -43,6 +43,12 @@ The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 - Double-width (CJK, emoji) and combining characters take one column each in notvim, but the terminal draws wide ones in two. A long line of them wraps onto the next row, pushes the rows below down and can scroll the screen; the cursor column is off too (planned as H6.12).
 - Invalid UTF-8 and C1 controls are shown as `?`.
 
+## Line endings
+
+Linux is LF, and so is this repository (`.gitattributes`, `.editorconfig` and `make check-eol`, which `make test` runs first).
+notvim never adds a carriage return to an LF file or to a new file. A file that uses CRLF throughout is recognised (shown as `[dos]` in the status line)
+and is written back as it was. Converting on purpose (`:set fileformat=unix`) is planned as H10.6.
+
 ## Build
 
 ```bash
