@@ -18,22 +18,41 @@
 #include "unity.h"
 #include "test_notvim.h"
 #include "tmpdir.h"
+#include "drawfmt.h"
+
+/** Size of the pty of the last spawn_notvim_size() or set_size(): screen() draws for it (a full row gets no erase, a short screen is erased below). */
+static unsigned short term_rows = 24, term_cols = 80;
 
 /**
- * @brief Start ./notvim on a new pty with @p rows rows and 80 columns.
- * @param file   Argument for notvim, or NULL for none.
- * @param rows   Terminal height.
- * @param master Receives the pty master descriptor.
+ * @brief Start ./notvim on a new pty of @p rows rows by @p cols columns.
+ * @param file          Argument for notvim, or NULL for none.
+ * @param rows          Terminal height.
+ * @param cols          Terminal width.
+ * @param nonblock_out  Non-zero to make the child's stdout non-blocking before it starts (the pty slave is shared by stdin and stdout).
+ * @param master        Receives the pty master descriptor.
  * @return The child's pid.
  */
-static pid_t spawn_notvim(const char *file, unsigned short rows, int *master) {
-	struct winsize ws = { .ws_row = rows, .ws_col = 80 };
+static pid_t spawn_notvim_full(const char *file, unsigned short rows, unsigned short cols, int nonblock_out, int *master) {
+	struct winsize ws = { .ws_row = rows, .ws_col = cols };
+	term_rows = rows;
+	term_cols = cols;
 	pid_t pid = forkpty(master, NULL, NULL, &ws);
 	if (pid == 0) {
+		if (nonblock_out) fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK);
 		execl("./notvim", "./notvim", file, (char *)NULL);
 		_exit(127);
 	}
 	return pid;
+}
+
+/** @brief Start ./notvim on a new pty of @p rows rows by @p cols columns; see spawn_notvim_full(). */
+static pid_t spawn_notvim_size(const char *file, unsigned short rows, unsigned short cols, int *master) {
+	return spawn_notvim_full(file, rows, cols, 0, master);
+}
+
+/** @brief Start ./notvim on a new pty with @p rows rows and 80 columns. */
+static pid_t spawn_notvim(const char *file, unsigned short rows, int *master) {
+	return spawn_notvim_size(file, rows, 80, master);
 }
 
 /**
@@ -105,9 +124,9 @@ static int quit_and_wait(int master, pid_t pid) {
 	return wait_exit(pid);
 }
 
-/** @brief Write the screen notvim should draw for @p text with the cursor at row @p row, column @p col (1-based). */
+/** @brief Write the screen notvim should draw, for the current pty size, for the rows @p text (NULL for none) with the cursor at row @p row, column @p col (1-based). */
 static void screen(char *buf, size_t size, const char *text, int row, int col) {
-	snprintf(buf, size, "\x1b[H\x1b[2J%s\x1b[%d;%dH", text, row, col);
+	draw_expected(buf, size, text, term_rows, term_cols, row, col);
 }
 
 /** Sequences notvim writes when it enters and leaves the alternate screen. */
@@ -132,6 +151,8 @@ static size_t send_and_read(int master, const char *keys, char *out, size_t size
 /** @brief Set the pty size; the kernel then sends SIGWINCH to the child. */
 static void set_size(int master, unsigned short rows, unsigned short cols) {
 	struct winsize ws = { .ws_row = rows, .ws_col = cols };
+	term_rows = rows;
+	term_cols = cols;
 	ioctl(master, TIOCSWINSZ, &ws);
 }
 
@@ -290,7 +311,7 @@ static void test_notvim_clips_long_lines_to_the_terminal_width(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
-/** @brief A file with an escape sequence is shown as text and cannot clear the screen. */
+/** @brief A file with an escape sequence is shown as text, and there is no clear-screen sequence in the output at all. */
 static void test_notvim_shows_escape_sequences_in_a_file_as_text(void) {
 	const char *path = tmpdir_write("danger.txt", "a\x1b[2Jb\nline2\n");
 	TEST_ASSERT_NOT_NULL(path);
@@ -305,10 +326,7 @@ static void test_notvim_shows_escape_sequences_in_a_file_as_text(void) {
 	TEST_ASSERT_EQUAL_INT(0, status);
 	first_screen(expected, sizeof(expected), "a^[[2Jb\r\nline2", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
-	/* the only clear-screen sequence is the one notvim itself sends */
-	const char *first_clear = strstr(out, "\x1b[2J");
-	TEST_ASSERT_NOT_NULL(first_clear);
-	TEST_ASSERT_NULL(strstr(first_clear + 1, "\x1b[2J"));
+	TEST_ASSERT_NULL_MESSAGE(strstr(out, "\x1b[2J"), "notvim never clears the screen, so a file cannot either");
 }
 
 /** @brief Lines full of tabs fill exactly the screen: they no longer wrap and scroll it. */
@@ -352,7 +370,7 @@ static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	char expected[256];
-	first_screen(expected, sizeof(expected), "", 1, 1);
+	first_screen(expected, sizeof(expected), NULL, 1, 1); /* an empty editor draws no row */
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 	struct stat st;
 	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
@@ -693,8 +711,9 @@ static void test_notvim_scrolls_to_keep_the_cursor_visible_after_a_shrink(void) 
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	TEST_ASSERT_TRUE(n >= 7);
-	TEST_ASSERT_EQUAL_STRING("\x1b[11;1H", moved + n - 7); /* the cursor was on line 11 before the resize */
+	TEST_ASSERT_TRUE(n >= 7 + 6);
+	moved[n - 6] = '\0'; /* what follows the cursor position is the show-cursor sequence */
+	TEST_ASSERT_EQUAL_STRING("\x1b[11;1H", moved + n - 6 - 7); /* the cursor was on line 11 before the resize */
 	resize_screen(expected, sizeof(expected), 7, 11, 40, 5); /* lines 7 to 11, cursor on the last row */
 	TEST_ASSERT_EQUAL_STRING(expected, after);
 }
@@ -939,6 +958,9 @@ static void test_notvim_resize_draws_a_full_screen_of_four_byte_text(void) {
 static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 	const char *path = tmpdir_write("nav.txt", "abcdef\n\xc3\xa9\xc3\xa9\xc3\xa9\nabcdef\n");
 	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, 24, &master);
+	/* spawned first: screen() draws for the size of the pty that was just created */
 	const char *text = "abcdef\r\n\xc3\xa9\xc3\xa9\xc3\xa9\r\nabcdef";
 	struct { const char *keys; int row, col; } steps[] = {
 		{ "l", 1, 2 }, { "l", 1, 3 }, { "l", 1, 4 },
@@ -957,9 +979,7 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 		screen(one, sizeof(one), text, steps[i].row, steps[i].col);
 		strcat(expected, one);
 	}
-	int master;
 	char first[1024], got[4096];
-	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	/* every key redraws once and in order, so the keys can go in one write and the redraws come back concatenated */
@@ -975,6 +995,9 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 static void test_notvim_remembers_the_column_over_uneven_lines(void) {
 	const char *path = tmpdir_write("uneven.txt", "abcdefgh\nab\n\nabcdefgh\n\xc3\xa9\t\xe2\x82\xac" "x\n");
 	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, 24, &master);
+	/* spawned first: screen() draws for the size of the pty that was just created */
 	/* the tab of the last line is drawn as seven spaces: e-acute at column 0, tab 1 to 7, euro sign at 8, x at 9 */
 	const char *text = "abcdefgh\r\nab\r\n\r\nabcdefgh\r\n\xc3\xa9       \xe2\x82\xac" "x";
 	struct { const char *keys; int row, col; } steps[] = {
@@ -1004,9 +1027,7 @@ static void test_notvim_remembers_the_column_over_uneven_lines(void) {
 		screen(one, sizeof(one), text, steps[i].row, steps[i].col);
 		strcat(expected, one);
 	}
-	int master;
 	char first[1024], got[16384];
-	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	send_and_read(master, keys, got, sizeof(got)); /* one write: every key redraws once, in order */
@@ -1022,6 +1043,9 @@ static void test_notvim_remembers_the_column_across_a_scroll(void) {
 	const char *lines[] = { "abcdefghij", "ab", "ab", "ab", "ab", "abcdefghij" };
 	const char *path = tmpdir_write("scroll.txt", "abcdefghij\nab\nab\nab\nab\nabcdefghij\n");
 	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, 4, &master);
+	/* spawned first: screen() draws for the size of the pty that was just created */
 	char keys[64] = "lllll", expected[16384] = "";
 	int cy = 0, rowoff = 0, cx = 5;
 	/* five l, five j (the window scrolls by two rows), five k: every key redraws once */
@@ -1043,9 +1067,7 @@ static void test_notvim_remembers_the_column_across_a_scroll(void) {
 		screen(one, sizeof(one), text, cy - rowoff + 1, col + 1);
 		strcat(expected, one);
 	}
-	int master;
 	char first[1024], got[16384];
-	pid_t pid = spawn_notvim(path, 4, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	send_and_read(master, keys, got, sizeof(got));
@@ -1093,6 +1115,121 @@ static void test_notvim_shows_a_mixed_file_with_marks(void) {
 	TEST_ASSERT_EQUAL_INT(0, status);
 	first_screen(expected, sizeof(expected), "one^M\r\ntwo\r\nthree^M", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, first);
+}
+
+/** @brief Count the non-overlapping occurrences of @p needle in @p hay. */
+static int count_of(const char *hay, const char *needle) {
+	int n = 0;
+	for (const char *p = hay; (p = strstr(p, needle)) != NULL; p += strlen(needle)) n++;
+	return n;
+}
+
+/**
+ * @brief Redraws after key presses never clear the screen: no ESC[2J, and each one hides the cursor, shows it again and erases the screen below the rows.
+ * The first draw needs no clear because the alternate screen starts blank; the scroll and resize paths are covered by the scroll and resize tests, which compare exact screens.
+ */
+static void test_notvim_redraws_never_clear_the_screen(void) {
+	const char *path = tmpdir_write("noclear.txt", "abc\ndef\nghi\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], moves[4096], expected[4096] = "", one[512];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "jlkh", moves, sizeof(moves)); /* four consecutive redraws */
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_NULL(strstr(first, "\x1b[2J"));
+	TEST_ASSERT_NULL(strstr(moves, "\x1b[2J"));
+	TEST_ASSERT_EQUAL_INT(1, count_of(first, "\x1b[?25l"));
+	TEST_ASSERT_EQUAL_INT(4, count_of(moves, "\x1b[?25l"));
+	TEST_ASSERT_EQUAL_INT(4, count_of(moves, "\x1b[?25h"));
+	TEST_ASSERT_EQUAL_INT(4, count_of(moves, "\x1b[J"));
+	const int cursors[4][2] = { { 2, 1 }, { 2, 2 }, { 1, 2 }, { 1, 1 } };
+	for (int i = 0; i < 4; i++) {
+		screen(one, sizeof(one), "abc\r\ndef\r\nghi", cursors[i][0], cursors[i][1]);
+		strcat(expected, one);
+	}
+	TEST_ASSERT_EQUAL_STRING(expected, moves);
+}
+
+/** Room for the biggest screens below (300 rows of 200 four-byte characters is 240 KB), and for the file that holds them. */
+#define HUGE_BYTES 400000
+
+/**
+ * @brief Run notvim on @p file_lines lines of @p per_line copies of @p unit and compare the first screen it draws, or, if
+ *        @p resize is set, the one it draws after growing from 2 rows by 80 columns to @p rows by @p cols.
+ *
+ * The expected screen has @p rows rows (or fewer if the file is shorter) of @p per_line characters each, so a row
+ * is full width when @p per_line == @p cols and gets its erase when it is shorter.
+ */
+static void assert_uniform_screen(const char *unit, int per_line, int file_lines, unsigned short rows, unsigned short cols,
+                                  int resize, int nonblock_out, size_t pause_ms) {
+	static char content[HUGE_BYTES], text[HUGE_BYTES], expected[HUGE_BYTES + 4096], got[HUGE_BYTES + 4096];
+	content[0] = text[0] = '\0';
+	for (int i = 0; i < file_lines; i++) {
+		append_repeated(content, unit, per_line);
+		strcat(content, "\n");
+	}
+	for (int i = 0; i < file_lines && i < rows; i++) {
+		if (i > 0) strcat(text, "\r\n");
+		append_repeated(text, unit, per_line);
+	}
+	const char *path = tmpdir_write("uniform.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = resize ? spawn_notvim_size(path, 2, 80, &master) : spawn_notvim_full(path, rows, cols, nonblock_out, &master);
+	int raw = wait_until_raw(master);
+	if (resize) {
+		read_output(master, got, sizeof(got));
+		set_size(master, rows, cols);
+	} else if (pause_ms) {
+		usleep((useconds_t)pause_ms * 1000); /* the child's first redraw meets a full pty buffer; the check is on the content */
+	}
+	read_output(master, got, sizeof(got));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	if (resize) screen(expected, sizeof(expected), text, 1, 1);
+	else first_screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, got);
+}
+
+/** @brief A tall narrow terminal (100 rows by 20 columns) of 4-byte characters, rows one column short of full: nothing is dropped. */
+static void test_notvim_tall_narrow_screen_of_four_byte_text_is_complete(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 19, 100, 100, 20, 0, 0, 0);
+}
+
+/** @brief The same screen with full-width rows (no erase at the end of a row). */
+static void test_notvim_tall_narrow_screen_of_full_width_four_byte_rows_is_complete(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 20, 100, 100, 20, 0, 0, 0);
+}
+
+/** @brief The tall narrow terminal reached by a resize (from 2 rows by 80 columns): the buffer is reallocated for it. */
+static void test_notvim_resize_to_a_tall_narrow_screen_of_four_byte_text_is_complete(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 20, 100, 100, 20, 1, 0, 0);
+}
+
+/** @brief A short wide terminal (2 rows by 200 columns) of 4-byte characters, full width and one short. */
+static void test_notvim_short_wide_screen_of_four_byte_text_is_complete(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 200, 5, 2, 200, 0, 0, 0);
+	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 5, 2, 200, 0, 0, 0);
+}
+
+/** @brief The short wide terminal reached by a resize. */
+static void test_notvim_resize_to_a_short_wide_screen_of_four_byte_text_is_complete(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 5, 2, 200, 1, 0, 0);
+}
+
+/**
+ * @brief With a non-blocking stdout and a reader that is 200 ms late, a 240 KB redraw still arrives whole:
+ *        main writes with terminal_write_all(), which waits and continues; a plain write() would lose the rest.
+ */
+static void test_notvim_redraw_survives_a_non_blocking_stdout_and_a_slow_reader(void) {
+	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 300, 300, 200, 0, 1, 200);
 }
 
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
@@ -1156,6 +1293,13 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_navigates_by_character_with_keys_and_arrows);
 	RUN_TEST(test_notvim_shows_a_crlf_file_without_marks);
 	RUN_TEST(test_notvim_shows_a_mixed_file_with_marks);
+	RUN_TEST(test_notvim_redraws_never_clear_the_screen);
+	RUN_TEST(test_notvim_tall_narrow_screen_of_four_byte_text_is_complete);
+	RUN_TEST(test_notvim_tall_narrow_screen_of_full_width_four_byte_rows_is_complete);
+	RUN_TEST(test_notvim_resize_to_a_tall_narrow_screen_of_four_byte_text_is_complete);
+	RUN_TEST(test_notvim_short_wide_screen_of_four_byte_text_is_complete);
+	RUN_TEST(test_notvim_resize_to_a_short_wide_screen_of_four_byte_text_is_complete);
+	RUN_TEST(test_notvim_redraw_survives_a_non_blocking_stdout_and_a_slow_reader);
 	RUN_TEST(test_notvim_remembers_the_column_over_uneven_lines);
 	RUN_TEST(test_notvim_remembers_the_column_across_a_scroll);
 }

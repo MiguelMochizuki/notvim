@@ -5,6 +5,7 @@
 #ifndef TERMINAL_H
 #define TERMINAL_H
 
+#include <stddef.h>
 #include <termios.h>
 
 /** Rows assumed when the terminal size can't be read. */
@@ -72,5 +73,23 @@ void terminal_leave_alt_screen(int fd);
  * @param cols Receives the number of columns; must not be NULL.
  */
 void terminal_get_size(int fd, int *rows, int *cols);
+
+/**
+ * @brief Write all @p n bytes of @p buf to @p fd.
+ *
+ * A write that stops short is continued from where it stopped, EINTR is
+ * retried, and on EAGAIN (a non-blocking descriptor with a full buffer) it
+ * waits with poll() until @p fd is writable again. Any other error stops it.
+ * SIGPIPE is not handled here: with its default action a write to a pipe with
+ * no reader kills the process, so EPIPE is only seen by a caller that ignores
+ * SIGPIPE. (A terminal never raises it.)
+ *
+ * @param fd  Descriptor to write to, usually STDOUT_FILENO.
+ * @param buf Bytes to write; may be NULL only if @p n is 0.
+ * @param n   Number of bytes; 0 writes nothing and succeeds.
+ * @return 0 when every byte was written, or -1 with errno set to the error of
+ *         the failed write() or poll() (for example EBADF or EPIPE).
+ */
+int terminal_write_all(int fd, const char *buf, size_t n);
 
 #endif

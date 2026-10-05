@@ -42,14 +42,14 @@ static int key_to_move(int key, editor_move_t *dir) {
 
 /** @brief Size in bytes of the draw buffer for a terminal of @p rows by @p cols. */
 static size_t draw_buffer_size(int rows, int cols) {
-	/* each of the rows lines holds up to cols characters of up to 4 bytes, plus "\r\n" between them */
-	return (size_t)rows * ((size_t)cols * 4 + 2) + EDITOR_DRAW_OVERHEAD;
+	/* each of the rows lines holds up to cols characters of up to 4 bytes, plus "ESC[K" after it and "\r\n" between them */
+	return (size_t)rows * ((size_t)cols * 4 + 3 + 2) + EDITOR_DRAW_OVERHEAD;
 }
 
-/** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes. */
-static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size) {
+/** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes; 0 if it all got written, -1 if the terminal can't be written to. */
+static int redraw(const editor_t *e, int rows, int cols, char *out, size_t size) {
 	size_t n = editor_draw(e, (size_t)rows, (size_t)cols, out, size);
-	write(STDOUT_FILENO, out, n);
+	return terminal_write_all(STDOUT_FILENO, out, n);
 }
 
 /**
@@ -63,6 +63,9 @@ static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size
  *
  * SIGWINCH makes it read the terminal size again, resize the draw buffer, scroll
  * so the cursor stays visible and redraw. If the buffer cannot grow, the old size is kept.
+ *
+ * Every redraw is written with terminal_write_all(); if it fails (the terminal is gone) the loop ends
+ * through the normal exit too.
  *
  * SIGINT, SIGTERM and SIGHUP end the editor through the normal exit, so the
  * alternate screen and the tty modes are restored.
@@ -115,7 +118,11 @@ int main(int argc, char **argv) {
 		fprintf(stderr, "notvim: %s\n", strerror(ENOMEM));
 		return 1;
 	}
-	redraw(&e, rows, cols, out, size);
+	if (redraw(&e, rows, cols, out, size) < 0) {
+		free(out);
+		editor_free(&e);
+		return 1; /* the terminal is gone: leave through the normal exit, which restores what it can */
+	}
 
 	key_parser_t parser;
 	key_parser_init(&parser);
@@ -147,7 +154,7 @@ int main(int argc, char **argv) {
 			rows = new_rows;
 			cols = new_cols;
 			editor_scroll(&e, (size_t)rows);
-			redraw(&e, rows, cols, out, size);
+			if (redraw(&e, rows, cols, out, size) < 0) break;
 			continue; /* a pending escape sequence stays pending */
 		} else {
 			char c;
@@ -160,7 +167,7 @@ int main(int argc, char **argv) {
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
 			editor_scroll(&e, (size_t)rows);
-			redraw(&e, rows, cols, out, size);
+			if (redraw(&e, rows, cols, out, size) < 0) break;
 		}
 	}
 

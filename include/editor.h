@@ -43,11 +43,16 @@ typedef enum {
 void editor_scroll(editor_t *e, size_t rows);
 
 /**
- * Room editor_draw() needs on top of the rendered text: the 7-byte clear and
- * home prefix, an upper bound of 44 bytes for the cursor position sequence,
- * and the NUL.
+ * Room editor_draw() needs on top of the rows: the 6-byte hide-cursor and the
+ * 3-byte home sequences, the move to the first free row ("ESC[<n>;1H", at most
+ * 25 bytes) and the 3-byte erase-to-end-of-screen, an upper bound of 44 bytes
+ * for the cursor position sequence, the 6-byte show-cursor sequence, and the
+ * NUL: 88 bytes. The rows themselves take their text (up to 4 bytes per
+ * column), 3 bytes each for an erase-to-end-of-line (only a row narrower than
+ * the screen has one) and 2 for each "\r\n" between them. The rows that fit
+ * are those whose bytes are at most the buffer size minus this constant.
  */
-#define EDITOR_DRAW_OVERHEAD 52
+#define EDITOR_DRAW_OVERHEAD 88
 
 /**
  * @brief Tell whether a key press should quit the editor.
@@ -186,13 +191,30 @@ int editor_load_file(editor_t *e, const char *path);
 /**
  * @brief Write a full screen redraw into @p out as a NUL-terminated string.
  *
- * The output clears the screen and moves home, then holds editor_render() of
- * @p max_rows lines from @c rowoff, then moves the cursor to row
- * cy-rowoff+1 (row 1 if the cursor is above the window), at the display
- * column of cx plus 1 (counted in characters; marks are two columns wide and a tab goes to the next
- * tab stop; the cursor is on the first column of a mark or tab). It
- * does not scroll: call editor_scroll() first. The cursor sequence is always complete: if @p out_size is too small
- * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
+ * The screen is not cleared first, so it does not flicker (the first draw
+ * needs no clear either: the alternate screen starts blank). The output hides
+ * the cursor and moves home ("ESC[?25l ESC[H"), then draws each visible row
+ * (the text of editor_render(), line by line, from @c rowoff, at most
+ * @p max_rows), separated by "\r\n". A row narrower than @p max_cols is
+ * followed by erase-to-end-of-line ("ESC[K"); a row of exactly @p max_cols
+ * columns is not, because after a character in the last column the cursor is
+ * still on it ("pending wrap") and the erase would remove that character.
+ * If fewer than @p max_rows rows were drawn, it then moves to the first free
+ * row and erases from there to the end of the screen ("ESC[<n+1>;1H ESC[J",
+ * which clears what an older, longer screen left below); a full screen has
+ * nothing to erase and gets neither. Last it moves the cursor to row
+ * cy-rowoff+1 (row 1 if the cursor is above the window) at the display
+ * column of cx plus 1 ("ESC[row;colH"; counted in characters; marks are two
+ * columns wide and a tab goes to the next tab stop; the cursor is on the
+ * first column of a mark or tab) and shows it ("ESC[?25h"). An editor with no
+ * lines draws "ESC[?25l ESC[H ESC[1;1H ESC[J ESC[1;1H ESC[?25h". There is never
+ * a clear-screen sequence ("ESC[2J").
+ *
+ * It does not scroll: call editor_scroll() first. No escape sequence or
+ * character is ever cut: the tail is always complete, and a row that does not
+ * fit whole in the room left (its text and its "ESC[K", and the "\r\n" before
+ * it) is left out together with the rows after it, and the erase clears their
+ * place. If @p out_size is smaller than EDITOR_DRAW_OVERHEAD nothing is
  * written. A cursor below the window is reported at its real row and the
  * terminal clamps it.
  *
@@ -202,9 +224,9 @@ int editor_load_file(editor_t *e, const char *path);
  *                 width; see editor_render(). A cursor column past it is drawn
  *                 on the last column.
  * @param out      Destination buffer.
- * @param out_size Size of @p out in bytes; it should be at least
- *                 EDITOR_DRAW_OVERHEAD plus the rendered text, which is up to
- *                 4 bytes per column plus 2 per row.
+ * @param out_size Size of @p out in bytes; EDITOR_DRAW_OVERHEAD plus the rows
+ *                 (up to 4 bytes per column, plus 3 per row for "ESC[K" and 2
+ *                 between rows) always holds the whole screen.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is
  *         smaller than EDITOR_DRAW_OVERHEAD.
  */

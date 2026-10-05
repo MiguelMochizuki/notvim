@@ -2,6 +2,8 @@
  * @file terminal.c
  * @brief Implementation of terminal.h. Public symbols are documented there.
  */
+#include <errno.h>
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
 #include <termios.h>
@@ -62,4 +64,20 @@ void terminal_leave_alt_screen(int fd) {
 	if (!alt_active) return;
 	if (write(fd, ALT_SCREEN_LEAVE, sizeof(ALT_SCREEN_LEAVE) - 1) < 0) return;
 	alt_active = 0;
+}
+
+int terminal_write_all(int fd, const char *buf, size_t n) {
+	while (n > 0) {
+		ssize_t w = write(fd, buf, n);
+		if (w >= 0) {
+			buf += w;
+			n -= (size_t)w;
+		} else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+			struct pollfd pfd = { .fd = fd, .events = POLLOUT };
+			if (poll(&pfd, 1, -1) < 0 && errno != EINTR) return -1;
+		} else if (errno != EINTR) {
+			return -1;
+		}
+	}
+	return 0;
 }

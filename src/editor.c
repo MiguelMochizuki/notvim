@@ -59,11 +59,11 @@ int editor_append_line(editor_t *e, const char *text) {
 	return 0;
 }
 
-/** @brief Copy up to @p len bytes of @p src to @p out at *pos without passing @p max. */
+/** @brief Copy up to @p len bytes of @p src to @p out at *pos without passing @p max; with a NULL @p out only advance *pos (a dry run to measure). */
 static void put(char *out, size_t *pos, size_t max, const char *src, size_t len) {
 	size_t room = max - *pos;
 	size_t n = len < room ? len : room;
-	memcpy(out + *pos, src, n);
+	if (out) memcpy(out + *pos, src, n);
 	*pos += n;
 }
 
@@ -140,8 +140,8 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->cx != old_cx) e->wantcol = display_col(line, e->cx); /* only a move that moves forgets the old column, as in Vim */
 }
 
-/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a character or a mark. */
-static void put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
+/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a character or a mark; return the columns it takes. */
+static size_t put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
 	static const char spaces[TAB_STOP + 1] = "        ";
 	size_t col = 0;
 	for (const char *p = line; *p; p += utf8_cell_len(p)) {
@@ -165,6 +165,7 @@ static void put_line(const char *line, size_t max_cols, char *out, size_t *pos, 
 			col += w;
 		}
 	}
+	return col;
 }
 
 size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
@@ -235,24 +236,38 @@ int editor_load_file(editor_t *e, const char *path) {
 	return rc;
 }
 
-/** Clear screen and move home. */
-#define CLEAR_HOME "\x1b[H\x1b[2J"
-/** Length of CLEAR_HOME. */
-#define CLEAR_HOME_LEN 7
 /** Upper bound for the cursor sequence "ESC [ row ; col H" with two 20-digit numbers. */
 #define CURSOR_SEQ_MAX 44
+/** Hide the cursor and move home: the start of every draw. */
+#define HIDE_HOME "\x1b[?25l\x1b[H"
+/** Length of HIDE_HOME. */
+#define HIDE_HOME_LEN 9
 
 size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
 	if (out_size < EDITOR_DRAW_OVERHEAD) {
 		if (out_size) out[0] = '\0';
 		return 0;
 	}
-	memcpy(out, CLEAR_HOME, CLEAR_HOME_LEN);
-	size_t pos = CLEAR_HOME_LEN;
-	pos += editor_render(e, max_rows, max_cols, out + pos, out_size - pos - CURSOR_SEQ_MAX);
+	memcpy(out, HIDE_HOME, HIDE_HOME_LEN);
+	size_t pos = HIDE_HOME_LEN;
+	size_t rows_end = out_size - EDITOR_DRAW_OVERHEAD + HIDE_HOME_LEN; /* where the rows must stop: the rest is for the tail */
+	size_t avail = e->rowoff < e->count ? e->count - e->rowoff : 0;
+	if (avail > max_rows) avail = max_rows;
+	size_t drawn = 0;
+	for (; drawn < avail; drawn++) {
+		const char *line = e->lines[e->rowoff + drawn];
+		size_t need = pos + (drawn > 0 ? 2 : 0);
+		size_t width = put_line(line, max_cols, NULL, &need, (size_t)-1); /* measure first: a row is whole or not at all */
+		if (width < max_cols) need += 3;
+		if (need > rows_end) break;
+		if (drawn > 0) put(out, &pos, rows_end, "\r\n", 2);
+		put_line(line, max_cols, out, &pos, rows_end);
+		if (width < max_cols) put(out, &pos, rows_end, "\x1b[K", 3); /* not after the last column: the cursor is still on it */
+	}
+	if (drawn < max_rows) pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;1H\x1b[J", drawn + 1);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
 	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
 	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
-	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", row + 1, col + 1);
+	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH\x1b[?25h", row + 1, col + 1);
 	return pos;
 }
