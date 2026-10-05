@@ -56,13 +56,13 @@ static int alt_active = 0;
 
 void terminal_enter_alt_screen(int fd) {
 	if (alt_active) return;
-	if (write(fd, ALT_SCREEN_ENTER, sizeof(ALT_SCREEN_ENTER) - 1) < 0) return;
+	if (terminal_write_all(fd, ALT_SCREEN_ENTER, sizeof(ALT_SCREEN_ENTER) - 1) < 0) return;
 	alt_active = 1;
 }
 
 void terminal_leave_alt_screen(int fd) {
 	if (!alt_active) return;
-	if (write(fd, ALT_SCREEN_LEAVE, sizeof(ALT_SCREEN_LEAVE) - 1) < 0) return;
+	if (terminal_write_all(fd, ALT_SCREEN_LEAVE, sizeof(ALT_SCREEN_LEAVE) - 1) < 0) return; /* still active: nothing was switched back */
 	alt_active = 0;
 }
 

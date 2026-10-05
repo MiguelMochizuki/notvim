@@ -442,6 +442,75 @@ static void test_terminal_write_all_reports_a_reader_that_quits_midway(void) {
 	TEST_ASSERT_EQUAL_INT_MESSAGE(0, exit_status_of(pid), "expected -1 with EPIPE, and no retry loop");
 }
 
+/** @brief Fork a reader that waits 100 ms, drains @p rfd to the end and exits 0 only if the last bytes it saw are @p tail. */
+static pid_t spawn_tail_checker(int rfd, int wfd, const char *tail) {
+	pid_t pid = fork();
+	if (pid == 0) {
+		close(wfd);
+		usleep(100000);
+		char last[16] = "";
+		size_t tail_len = strlen(tail);
+		char chunk[4096];
+		ssize_t r;
+		while ((r = read(rfd, chunk, sizeof(chunk))) > 0) {
+			for (ssize_t i = 0; i < r; i++) {
+				memmove(last, last + 1, tail_len - 1);
+				last[tail_len - 1] = chunk[i];
+			}
+		}
+		_exit(r == 0 && memcmp(last, tail, tail_len) == 0 ? 0 : 1);
+	}
+	close(rfd);
+	return pid;
+}
+
+/** @brief Fill the non-blocking write end @p fd until the pipe takes no more (EAGAIN). */
+static void fill_pipe(int fd) {
+	char chunk[4096];
+	memset(chunk, 'x', sizeof(chunk));
+	while (write(fd, chunk, sizeof(chunk)) > 0) { }
+	while (write(fd, "x", 1) > 0) { }
+}
+
+/** @brief Leaving the alternate screen on a non-blocking stdout whose buffer is full waits and still sends the whole sequence. */
+static void test_terminal_leave_alt_screen_survives_a_full_non_blocking_descriptor(void) {
+	int fds[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+	fcntl(fds[1], F_SETFL, fcntl(fds[1], F_GETFL) | O_NONBLOCK);
+	terminal_enter_alt_screen(fds[1]);
+	fill_pipe(fds[1]);
+	pid_t reader = spawn_tail_checker(fds[0], fds[1], "\x1b[?1049l");
+	terminal_leave_alt_screen(fds[1]);
+	close(fds[1]);
+	int status = exit_status_of(reader);
+	/* put the module back to "not active" whatever happened, so that the other tests are not affected */
+	int scratch[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(scratch));
+	terminal_leave_alt_screen(scratch[1]);
+	close(scratch[0]);
+	close(scratch[1]);
+	TEST_ASSERT_EQUAL_INT_MESSAGE(0, status, "the output did not end with the switch back from the alternate screen");
+}
+
+/** @brief A failed switch leaves the screen state as it was: not active after a failed enter, still active after a failed leave. */
+static void test_terminal_alt_screen_state_follows_what_was_written(void) {
+	int fds[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+	close(fds[0]);
+	signal(SIGPIPE, SIG_IGN);
+	terminal_enter_alt_screen(fds[1]); /* fails: nobody reads */
+	signal(SIGPIPE, SIG_DFL);
+	close(fds[1]);
+	int ok[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(ok));
+	terminal_leave_alt_screen(ok[1]); /* the enter failed, so this must write nothing */
+	close(ok[1]);
+	char got[16] = "";
+	ssize_t n = read(ok[0], got, sizeof(got));
+	close(ok[0]);
+	TEST_ASSERT_EQUAL_INT(0, (int)n);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_terminal_suite(void) {
 	RUN_TEST(test_terminal_sets_raw_flags);
@@ -465,4 +534,6 @@ void test_terminal_suite(void) {
 	RUN_TEST(test_terminal_write_all_reports_a_bad_descriptor);
 	RUN_TEST(test_terminal_write_all_reports_a_closed_reader);
 	RUN_TEST(test_terminal_write_all_reports_a_reader_that_quits_midway);
+	RUN_TEST(test_terminal_leave_alt_screen_survives_a_full_non_blocking_descriptor);
+	RUN_TEST(test_terminal_alt_screen_state_follows_what_was_written);
 }

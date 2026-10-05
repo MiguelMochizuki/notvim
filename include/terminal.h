@@ -46,6 +46,8 @@ void terminal_leave_raw(int fd);
  *
  * The editor draws there, so the shell screen and its scrollback are left
  * untouched until terminal_leave_alt_screen(). Does nothing if already active.
+ * The sequence is written with terminal_write_all(); if that fails the screen
+ * is not considered active.
  *
  * @param fd Terminal file descriptor to write to, usually STDOUT_FILENO.
  */
@@ -55,7 +57,9 @@ void terminal_enter_alt_screen(int fd);
  * @brief Switch back from the alternate screen buffer, restoring the shell screen.
  *
  * Does nothing if terminal_enter_alt_screen() was not called, so it is safe
- * to call twice.
+ * to call twice. The sequence is written with terminal_write_all(), so a
+ * non-blocking descriptor with a full buffer is waited for; if the write
+ * fails the screen stays marked active.
  *
  * @param fd Terminal file descriptor passed to terminal_enter_alt_screen().
  */
