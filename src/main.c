@@ -46,10 +46,32 @@ static size_t draw_buffer_size(int rows, int cols) {
 	return (size_t)rows * ((size_t)cols * 4 + 3 + 2) + EDITOR_DRAW_OVERHEAD;
 }
 
-/** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes; 0 if it all got written, -1 if the terminal can't be written to. */
-static int redraw(const editor_t *e, int rows, int cols, char *out, size_t size) {
-	size_t n = editor_draw(e, (size_t)rows, (size_t)cols, out, size);
-	return terminal_write_all(STDOUT_FILENO, out, n);
+/** The terminal size and the buffer one redraw is built in; they always match each other. */
+typedef struct {
+	int rows;    /**< Terminal height. */
+	int cols;    /**< Terminal width. */
+	char *buf;   /**< Draw buffer, owned. */
+	size_t size; /**< Size of @ref buf in bytes, from draw_buffer_size(). */
+} screen_t;
+
+/** @brief Read the terminal size and (re)allocate the buffer for it; on failure @p s keeps its old size and buffer and -1 is returned. */
+static int screen_fit(screen_t *s) {
+	int rows, cols;
+	terminal_get_size(STDOUT_FILENO, &rows, &cols);
+	size_t size = draw_buffer_size(rows, cols);
+	char *buf = realloc(s->buf, size); /* a NULL s->buf allocates */
+	if (!buf) return -1;
+	s->buf = buf;
+	s->size = size;
+	s->rows = rows;
+	s->cols = cols;
+	return 0;
+}
+
+/** @brief Draw the whole screen with the cursor; 0 if it all got written, -1 if the terminal can't be written to. */
+static int screen_draw(const screen_t *s, const editor_t *e) {
+	size_t n = editor_draw(e, (size_t)s->rows, (size_t)s->cols, s->buf, s->size);
+	return terminal_write_all(STDOUT_FILENO, s->buf, n);
 }
 
 /**
@@ -110,16 +132,13 @@ int main(int argc, char **argv) {
 	terminal_enter_alt_screen(STDOUT_FILENO);
 	atexit(cleanup);
 
-	int rows, cols;
-	terminal_get_size(STDOUT_FILENO, &rows, &cols);
-	size_t size = draw_buffer_size(rows, cols);
-	char *out = malloc(size);
-	if (!out) {
+	screen_t screen = { 0, 0, NULL, 0 };
+	if (screen_fit(&screen) < 0) {
 		fprintf(stderr, "notvim: %s\n", strerror(ENOMEM));
 		return 1;
 	}
-	if (redraw(&e, rows, cols, out, size) < 0) {
-		free(out);
+	if (screen_draw(&screen, &e) < 0) {
+		free(screen.buf);
 		editor_free(&e);
 		return 1; /* the terminal is gone: leave through the normal exit, which restores what it can */
 	}
@@ -144,17 +163,9 @@ int main(int argc, char **argv) {
 			break; /* SIGINT, SIGTERM or SIGHUP: leave through the normal exit so the terminal is restored */
 		} else if (pfds[2].revents & POLLIN) {
 			winch_drain();
-			int new_rows, new_cols;
-			terminal_get_size(STDOUT_FILENO, &new_rows, &new_cols);
-			size_t new_size = draw_buffer_size(new_rows, new_cols);
-			char *grown = realloc(out, new_size);
-			if (!grown) continue; /* keep the old size and buffer: they still match each other */
-			out = grown;
-			size = new_size;
-			rows = new_rows;
-			cols = new_cols;
-			editor_scroll(&e, (size_t)rows);
-			if (redraw(&e, rows, cols, out, size) < 0) break;
+			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
+			editor_scroll(&e, (size_t)screen.rows);
+			if (screen_draw(&screen, &e) < 0) break;
 			continue; /* a pending escape sequence stays pending */
 		} else {
 			char c;
@@ -166,13 +177,13 @@ int main(int argc, char **argv) {
 		editor_move_t dir;
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
-			editor_scroll(&e, (size_t)rows);
-			if (redraw(&e, rows, cols, out, size) < 0) break;
+			editor_scroll(&e, (size_t)screen.rows);
+			if (screen_draw(&screen, &e) < 0) break;
 		}
 	}
 
 	int sig = stopsig_received();
-	free(out);
+	free(screen.buf);
 	editor_free(&e);
 	return sig ? 128 + sig : 0;
 }
