@@ -27,11 +27,22 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | Insert mode: `i` to enter, `Esc` to leave |
+| In progress | Recognising a lone `Esc` |
+| Robustness | The limitations below, in order of harm (epic H6) |
+| Editing | Insert mode, typing characters, `Backspace` and `Enter` |
 | Navigation | Scrolling long lines horizontally |
-| Editing | Typing characters, `Backspace` and `Enter` |
 | Files | Saving with `:w`, quitting with `:q` and `:q!` |
 | Interface | A status line with file name, mode and cursor position |
+
+## Known limitations
+
+These are being fixed before new features (see epic H6 in [BACKLOG.md](BACKLOG.md)). Until then:
+
+- Do not open binary files: a NUL byte cuts its line short.
+- Files with tabs, accents or other non-ASCII text, control characters or CRLF line endings are not displayed correctly.
+- A lone `Esc` makes the next key press get lost.
+- The screen does not follow terminal resizes, and `kill` leaves the terminal on the alternate screen.
+- Output must go to a terminal: redirecting it writes escape sequences into the file or pipe.
 
 ## Build
 
