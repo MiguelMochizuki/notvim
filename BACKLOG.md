@@ -15,9 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
-  - Reproduced: a file containing `ESC [ 2 J` clears the screen when it is displayed.
-  - The marks are wider than the byte they replace, so the cursor and the clipping must count columns (shared with H6.4 and H6.8).
+- **H6.4** As user, I want tabs shown as spaces up to the next tab stop (8 columns), so that lines with tabs do not wrap and scroll the screen
+  - Reproduced: 24 lines of 20 tabs are 21 bytes each but 161 columns, and need 72 rows on a 24-row terminal.
+  - Introduces the difference between a byte index and a display column, for the cursor and for clipping.
 
 ## To do
 
@@ -26,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.4** As user, I want tabs shown as spaces up to the next tab stop (8 columns), so that lines with tabs do not wrap and scroll the screen
-  - Reproduced: 24 lines of 20 tabs are 21 bytes each but 161 columns, and need 72 rows on a 24-row terminal.
-  - Introduces the difference between a byte index and a display column, for the cursor and for clipping.
 - **H6.5** As user, I want notvim to refuse to start when stdin or stdout is not a terminal, so that it never writes escape sequences into a pipe or a file
   - Reproduced: `./notvim file | cat` writes the alternate-screen and cursor sequences into the pipe.
 - **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
@@ -193,3 +190,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - `main` prints `notvim: <path>: binary file (contains NUL bytes)` and exits 1 before raw mode, so it shows on the normal screen.
   - Decision: refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
   - Side effects: the "NUL after good lines" test exercises the cleanup of a half-loaded editor (part of H0.11). `tmpdir_write_bytes` was added for the tests, and it now refuses names with a `/`, after `../x` wrote outside the temporary directory.
+- **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
+  - Reproduced: a file containing `ESC [ 2 J` cleared the screen when it was displayed.
+  - A control byte (below `0x20` except tab, and `0x7f`) is drawn as a two-column mark: `^[`, `^A`, `^?`. A `\r` shows as `^M`, so the stray CR of CRLF files is gone too (H6.9 will hide it for real CRLF files).
+  - Design: `cell_width`, `display_col` and `put_line` in `editor.c` separate a byte index from a display column. Clipping counts columns and never shows half a mark; the drawn cursor column is the display column of `cx` (on the first column of a mark).
+  - Tabs and bytes of `0x80` and above are left alone here: H6.4 extends the same helpers for tabs, and H6.8 for UTF-8.
+  - The pty test checks that the only clear-screen sequence in the output is the one `notvim` sends itself.
