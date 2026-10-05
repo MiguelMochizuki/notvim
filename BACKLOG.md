@@ -15,9 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
-  - Reproduced: clipping a 201-byte line to 80 bytes gives invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
-  - Out of scope: double-width (CJK) and combining characters.
+- **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
+  - Reproduced: `abc\r\ndef\r\n` is drawn as `abc\r\r\ndef\r`.
+  - The saving half belongs with H4.1.
 
 ## To do
 
@@ -26,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
-  - Reproduced: `abc\r\ndef\r\n` is drawn as `abc\r\r\ndef\r`.
-  - The saving half belongs with H4.1.
 - **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
 - **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
   - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
@@ -207,3 +204,12 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - On a resize `main` re-reads the size, reallocates the draw buffer, calls `editor_scroll` and redraws. `draw_buffer_size()` is the single place that computes the buffer size.
   - Decisions: the handler is installed before raw mode, like `stopsig`. If `realloc` fails the old buffer and size are kept and nothing is redrawn. A resize in the middle of an escape sequence redraws and leaves the sequence pending.
   - Known gaps: the write end of the pipe is not tested for being non-blocking (needs 64 KB of signals). A resize while the file is loading is lost, which is harmless because the size is read afterwards.
+- **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
+  - Reproduced: clipping a 201-byte line to 80 bytes gave invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
+  - Design: a pure module `utf8` (RFC 3629: no overlong forms, surrogates or code points above U+10FFFF) with `utf8_valid_len`, `utf8_cell_len`, `utf8_is_c1` and `utf8_prev`. A cell is a valid character or one invalid byte.
+  - `editor.c` uses cells in `put_line`, `display_col` and `editor_move_cursor`. Each valid character is one column and is copied as its bytes; clipping is by columns and never cuts a character.
+  - `draw_buffer_size()` now allows 4 bytes per column (`rows * (cols * 4 + 2) + EDITOR_DRAW_OVERHEAD`), tested end to end with 2, 3 and 4-byte characters, at startup and on a resize.
+  - Decisions: each invalid byte is its own `?` (a truncated euro sign is `??`). A C1 control (U+0080 to U+009F, some terminals act on them) is one cell of two bytes drawn as one `?`.
+  - A vertical move that lands inside a character snaps back to its start; a clamp goes to the start of the last character. `cx` stays a byte index.
+  - Known gaps: double-width (CJK) and combining characters take one column each. `cx` is a byte index, so the cursor can drift left on multi-byte lines: see H6.10 (remembered column).
+  - Known gaps: the mutant "Left steps one byte" survives because the snap puts the cursor back on the character start (equivalent). Invalid UTF-8 is shown as `?`, so saving (H4.1) must keep the original bytes.
