@@ -25,6 +25,13 @@ typedef enum {
 } editor_move_t;
 
 /**
+ * Room editor_draw() needs on top of the rendered text: the 7-byte clear and
+ * home prefix, an upper bound of 44 bytes for the cursor position sequence,
+ * and the NUL.
+ */
+#define EDITOR_DRAW_OVERHEAD 52
+
+/**
  * @brief Tell whether a key press should quit the editor.
  * @param c Byte read from the terminal.
  * @return Non-zero if @p c is Ctrl+Q (0x11), 0 otherwise.
@@ -116,5 +123,25 @@ size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_s
  *         error (errno is set).
  */
 int editor_load_file(editor_t *e, const char *path);
+
+/**
+ * @brief Write a full screen redraw into @p out as a NUL-terminated string.
+ *
+ * The output clears the screen and moves home, then holds editor_render() of
+ * the first @p max_rows lines, then moves the cursor to row cy+1, column
+ * cx+1. The cursor sequence is always complete: if @p out_size is too small
+ * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
+ * written. A cursor below the visible rows keeps its real row and the
+ * terminal clamps it.
+ *
+ * @param e        Editor to draw; must not be NULL.
+ * @param max_rows Maximum number of lines to render, usually the terminal height.
+ * @param out      Destination buffer.
+ * @param out_size Size of @p out in bytes; it should be at least
+ *                 EDITOR_DRAW_OVERHEAD plus the rendered text.
+ * @return Number of bytes written, excluding the NUL; 0 if @p out_size is
+ *         smaller than EDITOR_DRAW_OVERHEAD.
+ */
+size_t editor_draw(const editor_t *e, size_t max_rows, char *out, size_t out_size);
 
 #endif

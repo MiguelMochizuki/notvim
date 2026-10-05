@@ -456,6 +456,75 @@ static void test_editor_load_resets_the_cursor(void) {
 	assert_cursor(0, 0);
 }
 
+/** Clear screen and move home: the start of every editor_draw() output. */
+#define CLEAR_HOME "\x1b[H\x1b[2J"
+
+/** @brief Assert that editor_draw() of the shared editor gives @p expected in a roomy buffer. */
+static void assert_draw(size_t max_rows, const char *expected) {
+	char out[512];
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, max_rows, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief Drawing an empty editor clears the screen and puts the cursor at 1;1. */
+static void test_editor_draw_empty_editor(void) {
+	editor_init(&e);
+	assert_draw(24, CLEAR_HOME "\x1b[1;1H");
+}
+
+/** @brief Drawing puts the text after the clear and the cursor at its row and column, 1-based. */
+static void test_editor_draw_lines_and_cursor(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_draw(24, CLEAR_HOME "ab\r\ncd" "\x1b[2;2H");
+}
+
+/** @brief The row limit applies to the drawn text. */
+static void test_editor_draw_limits_rows(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	assert_draw(1, CLEAR_HOME "ab" "\x1b[1;1H");
+}
+
+/** @brief A cursor below the visible rows is still reported at its real row. */
+static void test_editor_draw_cursor_below_visible_rows(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_draw(1, CLEAR_HOME "ab" "\x1b[3;1H");
+}
+
+/** @brief A buffer smaller than the overhead gets nothing, not half an escape sequence. */
+static void test_editor_draw_buffer_too_small_writes_nothing(void) {
+	editor_init(&e);
+	append("ab");
+	char out[EDITOR_DRAW_OVERHEAD] = "garbage";
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, out, EDITOR_DRAW_OVERHEAD - 1));
+	TEST_ASSERT_EQUAL_STRING("", out);
+	char untouched[1] = { 'x' };
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, untouched, 0));
+	TEST_ASSERT_EQUAL_INT('x', untouched[0]);
+}
+
+/** @brief With little spare room the text is cut but the cursor sequence stays whole. */
+static void test_editor_draw_cuts_text_but_keeps_cursor_sequence(void) {
+	editor_init(&e);
+	append("abcdef");
+	char out[EDITOR_DRAW_OVERHEAD + 3];
+	size_t n = editor_draw(&e, 24, out, sizeof(out));
+	const char *expected = CLEAR_HOME "abc" "\x1b[1;1H";
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -498,4 +567,10 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_cursor_up_clamps_column);
 	RUN_TEST(test_editor_cursor_on_empty_line_and_no_remembered_column);
 	RUN_TEST(test_editor_load_resets_the_cursor);
+	RUN_TEST(test_editor_draw_empty_editor);
+	RUN_TEST(test_editor_draw_lines_and_cursor);
+	RUN_TEST(test_editor_draw_limits_rows);
+	RUN_TEST(test_editor_draw_cursor_below_visible_rows);
+	RUN_TEST(test_editor_draw_buffer_too_small_writes_nothing);
+	RUN_TEST(test_editor_draw_cuts_text_but_keeps_cursor_sequence);
 }

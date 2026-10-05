@@ -130,3 +130,22 @@ int editor_load_file(editor_t *e, const char *path) {
 	errno = saved;
 	return rc;
 }
+
+/** Clear screen and move home. */
+#define CLEAR_HOME "\x1b[H\x1b[2J"
+/** Length of CLEAR_HOME. */
+#define CLEAR_HOME_LEN 7
+/** Upper bound for the cursor sequence "ESC [ row ; col H" with two 20-digit numbers. */
+#define CURSOR_SEQ_MAX 44
+
+size_t editor_draw(const editor_t *e, size_t max_rows, char *out, size_t out_size) {
+	if (out_size < EDITOR_DRAW_OVERHEAD) {
+		if (out_size) out[0] = '\0';
+		return 0;
+	}
+	memcpy(out, CLEAR_HOME, CLEAR_HOME_LEN);
+	size_t pos = CLEAR_HOME_LEN;
+	pos += editor_render(e, max_rows, out + pos, out_size - pos - CURSOR_SEQ_MAX);
+	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", e->cy + 1, e->cx + 1);
+	return pos;
+}
