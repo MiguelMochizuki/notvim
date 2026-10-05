@@ -15,9 +15,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
-  - Reproduced: `abc\r\ndef\r\n` is drawn as `abc\r\r\ndef\r`.
-  - The saving half belongs with H4.1.
+- **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
 
 ## To do
 
@@ -26,7 +24,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
 - **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
   - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
 
@@ -57,6 +54,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - A missing file is created here, not on load (H1.4).
   - An editor with 0 lines saves as an empty file, and one empty line as `"\n"` (H0.8).
   - Loading never truncates, so saving a long file must write every line (H0.8).
+  - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
 - **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
 
 ### H5 Interface
@@ -115,7 +113,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Rendering: lines are joined by `\r\n`, because raw mode clears `OPOST` and a bare `\n` would not return to column 0. An OS-dependent line-ending macro was discussed and not added (UNIX only).
   - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). It is read again on `SIGWINCH` (H6.7).
   - Known gaps:
-    - CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line): see H6.9 and H6.2.
+    - CRLF files and NUL bytes inside lines were not handled at this point (since fixed: see H6.9 and H6.2).
     - The out-of-memory path of `editor_load_file`, and the cleanup after a read error halfway through a file, are not tested: see H0.11.
   - Lines wider than the terminal were not clipped here; solved in H2.4.
 
@@ -213,3 +211,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - A vertical move that lands inside a character snaps back to its start; a clamp goes to the start of the last character. `cx` stays a byte index.
   - Known gaps: double-width (CJK) and combining characters take one column each. `cx` is a byte index, so the cursor can drift left on multi-byte lines: see H6.10 (remembered column).
   - Known gaps: the mutant "Left steps one byte" survives because the snap puts the cursor back on the character start (equivalent). Invalid UTF-8 is shown as `?`, so saving (H4.1) must keep the original bytes.
+- **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
+  - Reproduced: `abc\r\ndef\r\n` was drawn as `abc\r\r\ndef\r`.
+  - Design: `editor_load_file` reads every line as before while counting the lines ended by `\n` and whether each has a `\r` before it. After the whole file is read, a CRLF file loses that `\r` on each terminated line and sets the new field `editor_t.crlf`.
+  - Decisions: a file is CRLF only if it has at least one terminated line and every one has the `\r`. A last line without a newline is ignored for the detection and keeps a trailing `\r`. LF, empty and mixed files are left alone, so a stray `\r` shows as `^M`.
+  - `crlf` is reset by `editor_init`, `editor_free` and every load, failed or not. No change to the rendering. The tests use files of 60 KB and a 10000-byte line so that a decision from the first read block would fail.
+  - Known gaps: saving is not built (H4.1) and must write `\r\n` when `crlf` is set. A mixed file keeps its `\r` on the lines that have it, and the editor cannot tell the user the file is mixed.
