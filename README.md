@@ -11,8 +11,9 @@ Early development. Currently supports:
 - Exit with `Ctrl+Q`
 - Opening a file given on the command line and showing its lines, up to the terminal height (read-only)
 - Moving the cursor with the arrow keys or `h j k l`, scrolling when it leaves the screen
+- Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit; lines wider than the terminal are clipped
 
-Not yet implemented: insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
+Not yet implemented: horizontal scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
 ## Build
 
@@ -43,9 +44,9 @@ More will come as histories land.
 
 - `src/main.c`: entry point (argument, raw mode, input loop, key mapping, redraw after each move).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
-  the cursor and vertical scrolling, loading a file, rendering and drawing a window of rows.
+  the cursor and vertical scrolling, loading a file, rendering and drawing a window of rows and columns.
 - `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows).
-- `src/terminal.c`, `include/terminal.h`: raw mode and terminal size.
+- `src/terminal.c`, `include/terminal.h`: raw mode, alternate screen and terminal size.
 - `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
   the built `./notvim` on a pty, and `tmpdir.c`, a per-test temporary directory.
   `tests/unity/` is vendored.
