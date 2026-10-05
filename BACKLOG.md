@@ -19,21 +19,16 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
-  - Done so far: the command line, the dispatcher (`src/commands.c`), `:w` (H4.1) and `modified`; `:q`, `:q!`, `:wq`, `:x` still show `E492`.
-  - Decisions: Backspace on an empty command line and Esc cancel, as Vim does (checked); `:` in insert mode types a colon; Ctrl+Q quits in every mode.
-  - Known gaps: a command line wider than the terminal is cut on the right (Vim scrolls it); no history, no editing inside the line; Ctrl+Q ignores `[+]`.
-
-## To do
-
-Order of work: H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
-Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
-
-### H2 Navigation
-
 - **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
   - Same mechanism as `rowoff`, for columns: `coloff`, `editor_scroll` with the width, the drawn cursor column relative to it.
   - Until then the cursor stops on the last visible column of a clipped line.
+
+## To do
+
+Order of work: H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
+
+### H2 Navigation
 
 ### H6 Robustness with real files and terminals
 
@@ -111,6 +106,11 @@ Do these once insert mode and yank exist.
 
 ### H4 Saving and quitting
 
+- **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
+  - Design: `editor_t.quit` is the request flag, set by `commands_run()` (`:q`, `:q!`, `:wq`, `:x`); `main` leaves its loop on it, so the normal exit restores the alternate screen and the tty, status 0. `ZZ`/`ZQ` use `editor_t.zpend`.
+  - Decisions: checked against Vim 9.1: `E37: No write since last change (add ! to override)`; `:x` writes only a modified buffer; `:wq` always writes; a failed write (`E32`, strerror) does not quit; `Zj` moves; `:wq name` quits.
+  - Decisions: Ctrl+Q is `:q` in every mode (refused with E37 when `[+]`); `ZZ` is `:x`, `ZQ` is `:q!`; `:wq!` and `:x!` are accepted. `editor_should_exit()` is gone.
+  - Known gaps: one buffer only (no `:qa`, `:wqa`); Ctrl+Q also drops a half-typed command line; a `Z` waits for its next key silently (Vim shows `Z` in the bottom row).
 - **H4.1** As user, I want to save with `:w`, so I don't lose my work
   - Design: `editor_write_file()` (`src/writer.c`) writes a temp file in the target directory (`mkstemp`), `fsync`, `rename`; the dispatcher is `commands_run()` in `src/commands.c`.
   - Decisions: LF only unless loaded as CRLF; a lone CR and invalid bytes are written as stored; a missing final newline is added (Vim does, checked); a symlink is written through.
