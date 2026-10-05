@@ -2058,6 +2058,681 @@ static void test_editor_a_loaded_file_starts_with_no_wanted_column(void) {
 	assert_cursor(1, 0);
 }
 
+/* ---- the path the editor was loaded from (H5.1) ---- */
+
+/** @brief A fresh editor has no path. */
+static void test_editor_init_has_no_path(void) {
+	e.path = (char *)"garbage";
+	editor_init(&e);
+	TEST_ASSERT_NULL(e.path);
+}
+
+/** @brief Loading a file remembers the path it was given, as a copy of its own. */
+static void test_editor_load_remembers_the_path_as_a_copy(void) {
+	editor_init(&e);
+	const char *given = tmpdir_write("named.txt", "x\n");
+	TEST_ASSERT_NOT_NULL(given);
+	char path[128];
+	snprintf(path, sizeof(path), "%s", given);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_NOT_NULL(e.path);
+	TEST_ASSERT_EQUAL_STRING(given, e.path);
+	TEST_ASSERT_TRUE_MESSAGE(e.path != path, "the path must be copied, not kept");
+	path[0] = '?'; /* the caller's buffer changes: the copy does not */
+	TEST_ASSERT_EQUAL_STRING(given, e.path);
+}
+
+/** @brief A file that does not exist still gives the editor its name: the saver will create it. */
+static void test_editor_load_of_a_missing_file_keeps_the_path(void) {
+	editor_init(&e);
+	const char *path = tmpdir_path("missing.txt");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_NOT_NULL(e.path);
+	TEST_ASSERT_EQUAL_STRING(path, e.path);
+}
+
+/** @brief Loading again replaces the path, also by the one of a missing file. */
+static void test_editor_load_again_replaces_the_path(void) {
+	editor_init(&e);
+	char first[128];
+	snprintf(first, sizeof(first), "%s", tmpdir_write("first.txt", "1\n"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, first));
+	char second[128];
+	snprintf(second, sizeof(second), "%s", tmpdir_write("second.txt", "2\n"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, second));
+	TEST_ASSERT_EQUAL_STRING(second, e.path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, "no-such-file-here.txt"));
+	TEST_ASSERT_EQUAL_STRING("no-such-file-here.txt", e.path);
+}
+
+/** @brief A load that fails leaves no path, not even the one from before (the contents are dropped too). */
+static void test_editor_failed_load_leaves_no_path(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("ok.txt", "x\n")));
+	TEST_ASSERT_NOT_NULL(e.path);
+	const char data[] = { 'a', '\0', 'b' };
+	const char *binary = tmpdir_write_bytes("bin.dat", data, sizeof(data));
+	TEST_ASSERT_NOT_NULL(binary);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, binary));
+	TEST_ASSERT_NULL(e.path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("ok2.txt", "x\n")));
+	TEST_ASSERT_NOT_NULL(e.path);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, tmpdir_path("."))); /* a directory: reading fails */
+	TEST_ASSERT_NULL(e.path);
+}
+
+/** @brief editor_free() drops the path and is safe twice. */
+static void test_editor_free_drops_the_path(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("gone.txt", "x\n")));
+	TEST_ASSERT_NOT_NULL(e.path);
+	editor_free(&e);
+	TEST_ASSERT_NULL(e.path);
+	editor_free(&e);
+	TEST_ASSERT_NULL(e.path);
+}
+
+/* ---- the status line (H5.1) ---- */
+
+/** @brief The text window is one row shorter than the terminal, except on a terminal of 0 or 1 rows. */
+static void test_editor_text_rows_reserves_the_status_row(void) {
+	TEST_ASSERT_EQUAL_UINT(23, editor_text_rows(24));
+	TEST_ASSERT_EQUAL_UINT(1, editor_text_rows(2));
+	TEST_ASSERT_EQUAL_UINT(1, editor_text_rows(1));
+	TEST_ASSERT_EQUAL_UINT(0, editor_text_rows(0));
+}
+
+/** @brief Assert that the status line of the shared editor at @p cols columns is exactly @p expected (and NUL-terminated, with the length returned). */
+static void assert_status(size_t cols, const char *expected) {
+	char out[1024];
+	memset(out, 'x', sizeof(out));
+	size_t n = editor_status(&e, cols, out, sizeof(out));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief Load @p name (a path of a file that does not exist) into the shared editor, so that it has that name. */
+static void name_it(const char *name) {
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, name));
+	TEST_ASSERT_NOT_NULL(e.path);
+}
+
+/** @brief Without a name the status line says [No Name], then the mode, and the position is at the right: 1,1 for an empty editor. */
+static void test_editor_status_without_a_name(void) {
+	editor_init(&e);
+	assert_status(30, "[No Name] NORMAL" "           " "1,1");
+}
+
+/** @brief The name is the path as given. */
+static void test_editor_status_shows_the_path(void) {
+	editor_init(&e);
+	name_it("no-such-dir/main.c");
+	assert_status(40, "no-such-dir/main.c NORMAL" "            " "1,1");
+}
+
+/** @brief The position is the line and the column of the cursor, both 1-based. */
+static void test_editor_status_shows_line_and_column(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_status(20, "[No Name] NORMAL" " " "3,2");
+}
+
+/** @brief A line number of two digits widens the position, which keeps ending in the last column. */
+static void test_editor_status_with_a_two_digit_line(void) {
+	editor_init(&e);
+	for (int i = 0; i < 12; i++) append("x");
+	for (int i = 0; i < 11; i++) editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_status(24, "[No Name] NORMAL" "    " "12,1");
+}
+
+/** @brief The column is not clipped to the width: 100 characters in is column 100, and the position keeps its place over the label. */
+static void test_editor_status_column_is_not_clipped(void) {
+	editor_init(&e);
+	char wide[101];
+	memset(wide, 'a', 100);
+	wide[100] = '\0';
+	append(wide);
+	for (int i = 0; i < 99; i++) editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_status(20, "[No Name] NORM" " " "1,100");
+}
+
+/** @brief The position always ends in the last column, at any width that has room for it and the gap. */
+static void test_editor_status_position_ends_in_the_last_column(void) {
+	editor_init(&e);
+	size_t widths[] = { 4, 5, 10, 19, 20, 21, 33, 79, 80, 200 };
+	for (size_t i = 0; i < sizeof(widths) / sizeof(widths[0]); i++) {
+		char out[1024], msg[64];
+		size_t cols = widths[i];
+		snprintf(msg, sizeof(msg), "width %zu", cols);
+		size_t n = editor_status(&e, cols, out, sizeof(out));
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(cols, n, msg);
+		TEST_ASSERT_EQUAL_STRING_MESSAGE("1,1", out + cols - 3, msg);
+		TEST_ASSERT_EQUAL_INT_MESSAGE(' ', out[cols - 4], msg);
+	}
+}
+
+/** @brief Assert that the position of the shared editor, in a status line 30 columns wide, is @p position (the last characters). */
+static void assert_position(const char *position) {
+	char out[1024];
+	size_t n = editor_status(&e, 30, out, sizeof(out));
+	size_t len = strlen(position);
+	TEST_ASSERT_EQUAL_UINT(30, n);
+	TEST_ASSERT_EQUAL_STRING(position, out + n - len);
+}
+
+/** @brief The column is the display column: after a tab it is 9, since the tab takes the columns 1 to 8. */
+static void test_editor_status_column_after_a_tab(void) {
+	editor_init(&e);
+	append("\tx");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,9");
+}
+
+/** @brief On a tab the column is the one where the tab starts, as the cursor is drawn there. */
+static void test_editor_status_column_on_a_tab(void) {
+	editor_init(&e);
+	append("ab\tx");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,3");
+}
+
+/** @brief On a mark the column is the one where the mark starts. */
+static void test_editor_status_column_on_a_mark(void) {
+	editor_init(&e);
+	append("a\x01" "b");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,2");
+}
+
+/** @brief A mark such as ^A takes two columns: the character after it is at column 4. */
+static void test_editor_status_column_after_a_mark(void) {
+	editor_init(&e);
+	append("a\x01" "b");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,4");
+}
+
+/** @brief A multi-byte character is one column, not its bytes. */
+static void test_editor_status_column_counts_characters(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xe2\x82\xac" "z");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,3");
+}
+
+/** @brief An invalid byte and a C1 control are one column each, drawn as '?'. */
+static void test_editor_status_column_counts_invalid_bytes_and_c1(void) {
+	editor_init(&e);
+	append("a\xff" "b\xc2\x9b" "c");
+	for (int i = 0; i < 4; i++) editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_position("1,5");
+}
+
+/** @brief The mode label follows the name after one space. */
+static void test_editor_status_has_the_mode_label_after_the_name(void) {
+	editor_init(&e);
+	name_it("a.txt");
+	assert_status(30, "a.txt NORMAL" "               " "1,1");
+}
+
+/** @brief A control byte in the name is a mark, so a name can never send a command to the terminal: no byte below 0x20 comes out. */
+static void test_editor_status_shows_marks_in_the_name(void) {
+	editor_init(&e);
+	name_it("a\x1b[2Jb");
+	assert_status(30, "a^[[2Jb NORMAL" "             " "1,1");
+	name_it("\x01\x7f\x1f.c");
+	char out[1024];
+	editor_status(&e, 40, out, sizeof(out));
+	for (const char *p = out; *p; p++) TEST_ASSERT_TRUE_MESSAGE((unsigned char)*p >= 0x20 && *p != 0x7f, "a control byte reached the status text");
+	TEST_ASSERT_EQUAL_STRING("^A^?^_.c NORMAL" "                      " "1,1", out);
+}
+
+/** @brief A tab in the name is spaces to the next multiple of 8 columns from the start of the line. */
+static void test_editor_status_shows_a_tab_in_the_name_as_spaces(void) {
+	editor_init(&e);
+	name_it("a\tb");
+	assert_status(30, "a       b NORMAL" "           " "1,1");
+}
+
+/** @brief A UTF-8 name is copied: 6 columns of name, 13 of text, and 3 more bytes than columns. */
+static void test_editor_status_shows_a_utf8_name(void) {
+	editor_init(&e);
+	name_it("\xc3\xa9\xe2\x82\xac.txt");
+	assert_status(40, "\xc3\xa9\xe2\x82\xac.txt NORMAL" "                        " "1,1");
+}
+
+/** @brief An invalid byte and a C1 control in the name are '?', as in the text. */
+static void test_editor_status_shows_invalid_bytes_and_c1_in_the_name_as_question_marks(void) {
+	editor_init(&e);
+	name_it("a\xff" "b\xc2\x9b" "c");
+	assert_status(30, "a?b?c NORMAL" "               " "1,1");
+}
+
+/** @brief A mark that does not fit is not shown half: at a width that leaves one column for it, it is left out and the line is padded. */
+static void test_editor_status_never_cuts_a_mark(void) {
+	editor_init(&e);
+	name_it("a\x01");
+	assert_status(5, "a" " " "1,1");        /* room for the name: 1 column, "a" */
+	assert_status(6, "a" "  " "1,1");        /* 2 columns: "a" and the mark would need 3 */
+	assert_status(7, "a^A" " " "1,1");      /* 3 columns: the whole mark */
+	assert_status(8, "a^A " " " "1,1");     /* 4 columns: the space after it */
+}
+
+/** @brief One cell of a name as the status shows it, for the oracle of the truncation test. */
+typedef struct {
+	const char *cells[24]; /**< The cells of "<name> NORMAL" as drawn, NULL ends the list. */
+} drawn_t;
+
+/** @brief Assert that the status line of the shared editor at every width from 0 to 30 is the first cells of @p d that fit in the width less the position, padded, with the position cut on the right when it does not fit. */
+static void assert_status_at_every_width(const drawn_t *d) {
+	const char *right = "1,1";
+	for (size_t cols = 0; cols <= 30; cols++) {
+		char expected[256] = "", out[1024], msg[64];
+		if (cols <= 3) {
+			strncat(expected, right, cols);
+		} else {
+			size_t avail = cols - 4, used = 0;
+			for (size_t i = 0; d->cells[i]; i++) {
+				size_t w = d->cells[i][0] == '^' ? 2 : 1; /* a mark is two columns, any other cell is one */
+				if (used + w > avail) break;
+				strcat(expected, d->cells[i]);
+				used += w;
+			}
+			for (size_t pad = cols - 3 - used; pad > 0; pad--) strcat(expected, " ");
+			strcat(expected, right);
+		}
+		snprintf(msg, sizeof(msg), "width %zu", cols);
+		memset(out, 'x', sizeof(out));
+		size_t n = editor_status(&e, cols, out, sizeof(out));
+		TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, out, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(strlen(expected), n, msg);
+	}
+}
+
+/** @brief Truncation at every width from 0 to wider than needed, for a plain name, a name with a mark and a name with multi-byte characters. */
+static void test_editor_status_truncates_at_every_width(void) {
+	editor_init(&e);
+	name_it("a.txt");
+	drawn_t plain = { { "a", ".", "t", "x", "t", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&plain);
+	name_it("a\x01" "b");
+	drawn_t mark = { { "a", "^A", "b", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&mark);
+	name_it("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80x");
+	drawn_t utf8 = { { "\xc3\xa9", "\xe2\x82\xac", "\xf0\x9f\x98\x80", "x", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&utf8);
+	name_it("a\tb"); /* cut inside the 7 spaces of the tab */
+	drawn_t tab = { { "a", " ", " ", " ", " ", " ", " ", " ", "b", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&tab);
+	name_it("\xe2\x82"); /* a truncated sequence: two invalid bytes, '?' each */
+	drawn_t bad = { { "?", "?", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&bad);
+	name_it("a.txt");
+	e.crlf = 1;
+	drawn_t dos = { { "a", ".", "t", "x", "t", " ", "[", "d", "o", "s", "]", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	assert_status_at_every_width(&dos);
+}
+
+/** @brief Literal cases of a narrow terminal: the position wins, then the name is cut from the right, the mode label first. */
+static void test_editor_status_on_a_narrow_terminal(void) {
+	editor_init(&e);
+	name_it("n.txt");
+	assert_status(0, "");
+	assert_status(1, "1");
+	assert_status(2, "1,");
+	assert_status(3, "1,1");
+	assert_status(4, " 1,1");
+	assert_status(5, "n" " " "1,1");
+	assert_status(10, "n.txt " " " "1,1");
+	assert_status(12, "n.txt NO 1,1");
+	assert_status(15, "n.txt NORMA 1,1");
+	assert_status(16, "n.txt NORMAL 1,1");
+	assert_status(17, "n.txt NORMAL" "  " "1,1");
+}
+
+/** @brief The status is exactly @p cols columns wide: for ASCII, @p cols bytes, whatever the name and the width. */
+static void test_editor_status_is_exactly_the_width(void) {
+	editor_init(&e);
+	name_it("some/dir/with a long name.c");
+	for (size_t cols = 0; cols < 100; cols++) {
+		char out[1024], msg[64];
+		snprintf(msg, sizeof(msg), "width %zu", cols);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(cols, editor_status(&e, cols, out, sizeof(out)), msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(cols, strlen(out), msg);
+	}
+}
+
+/** @brief A buffer that is too small gets the line cut at the buffer, still NUL-terminated; a size of 0 is untouched. */
+static void test_editor_status_into_a_small_buffer(void) {
+	editor_init(&e);
+	char out[8];
+	memset(out, 'x', sizeof(out));
+	TEST_ASSERT_EQUAL_UINT(0, editor_status(&e, 30, out, 0));
+	TEST_ASSERT_EQUAL_INT('x', out[0]);
+	TEST_ASSERT_EQUAL_UINT(4, editor_status(&e, 30, out, 5));
+	TEST_ASSERT_EQUAL_STRING("[No ", out);
+	TEST_ASSERT_EQUAL_INT('x', out[5]);
+	/* a buffer that is too small is cut at a byte, as documented (editor_draw_screen() reserves the room, so it never meets this) */
+	name_it("\xc3\xa9\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(2, editor_status(&e, 30, out, 3));
+	TEST_ASSERT_EQUAL_STRING("\xc3\xa9", out);
+	TEST_ASSERT_EQUAL_UINT(1, editor_status(&e, 30, out, 2));
+	TEST_ASSERT_EQUAL_STRING("\xc3", out);
+	char all[64];
+	TEST_ASSERT_EQUAL_UINT(1, editor_status(&e, 1, all, sizeof(all)));
+	TEST_ASSERT_EQUAL_STRING("1", all);
+}
+
+/** @brief Loading the editor's own path (a reload, as ":e" will do) works: the path is copied before the old one is freed. */
+static void test_editor_load_of_its_own_path_works(void) {
+	editor_init(&e);
+	const char *path = tmpdir_write("self.txt", "one\n");
+	TEST_ASSERT_NOT_NULL(path);
+	char expected[128];
+	snprintf(expected, sizeof(expected), "%s", path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_NOT_NULL(tmpdir_write("self.txt", "two\nthree\n"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, e.path));
+	TEST_ASSERT_EQUAL_STRING(expected, e.path);
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "two");
+	/* and when that load fails: the file is now a binary one */
+	const char data[] = { 'a', '\0' };
+	TEST_ASSERT_NOT_NULL(tmpdir_write_bytes("self.txt", data, sizeof(data)));
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, e.path));
+	TEST_ASSERT_NULL(e.path);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+}
+
+/** @brief An empty path is no name: the status shows [No Name]. */
+static void test_editor_status_of_an_empty_path_is_no_name(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, ""));
+	assert_status(30, "[No Name] NORMAL" "           " "1,1");
+}
+
+/** @brief The mode label is NORMAL: the one place Task 2 changes. */
+static void test_editor_mode_label_is_normal(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_STRING("NORMAL", editor_mode_label(&e));
+}
+
+/** @brief A CRLF file shows [dos] after its name, before the mode label. */
+static void test_editor_status_shows_dos_for_a_crlf_file(void) {
+	editor_init(&e);
+	const char *path = tmpdir_write("dos.txt", "a\r\nb\r\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	char out[1024], want[1024];
+	snprintf(want, sizeof(want), "%s [dos] NORMAL", path);
+	size_t n = editor_status(&e, 100, out, sizeof(out));
+	TEST_ASSERT_EQUAL_UINT(100, n);
+	TEST_ASSERT_EQUAL_INT(0, strncmp(want, out, strlen(want)));
+	TEST_ASSERT_EQUAL_STRING("1,1", out + 97);
+}
+
+/** @brief An LF file, a mixed file and an editor without a file show no [dos]. */
+static void test_editor_status_shows_no_dos_for_other_files(void) {
+	editor_init(&e);
+	char out[1024];
+	editor_status(&e, 40, out, sizeof(out));
+	TEST_ASSERT_NULL(strstr(out, "[dos]"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("lf.txt", "a\nb\n")));
+	editor_status(&e, 200, out, sizeof(out));
+	TEST_ASSERT_NULL(strstr(out, "[dos]"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("mixed.txt", "a\r\nb\n")));
+	editor_status(&e, 200, out, sizeof(out));
+	TEST_ASSERT_NULL(strstr(out, "[dos]"));
+}
+
+/** @brief [dos] with a UTF-8 name and a mark in it, then cut with the rest of the left part: never inside a character or a mark. */
+static void test_editor_status_dos_with_a_utf8_name_and_truncation(void) {
+	editor_init(&e);
+	name_it("\xc3\xa9\x01.txt");
+	e.crlf = 1; /* as after loading a CRLF file (loading resets it) */
+	/* the left part: e-acute (1 column), ^A (2), ".txt" (4), " [dos]" (6), " NORMAL" (7) = 20 columns */
+	assert_status(30, "\xc3\xa9^A.txt [dos] NORMAL" "       " "1,1");
+	assert_status(16, "\xc3\xa9^A.txt [dos" " " "1,1");  /* cut inside [dos]: 12 columns */
+	assert_status(11, "\xc3\xa9^A.txt" " " "1,1");
+	assert_status(10, "\xc3\xa9^A.tx" " " "1,1");
+	assert_status(7, "\xc3\xa9^A" " " "1,1");
+	assert_status(6, "\xc3\xa9" "  " "1,1");              /* the mark would need 2 columns and 1 is left */
+}
+
+/* ---- drawing with the status line (H5.1) ---- */
+
+/** @brief Draw the shared editor on a terminal of @p rows by @p cols into a roomy buffer and compare with the literal @p expected. */
+static void assert_screen_literal(size_t rows, size_t cols, const char *expected) {
+	char out[2048];
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw_screen(&e, rows, cols, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief The exact bytes: text rows, erase of the unused text rows, then the status line in reverse video, then the cursor. */
+static void test_editor_draw_screen_exact_bytes(void) {
+	editor_init(&e);
+	name_it("f.txt");
+	append("ab");
+	append("cd");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_screen_literal(4, 20, "\x1b[?25l\x1b[H" "ab\x1b[K\r\n" "cd\x1b[K" "\x1b[3;1H\x1b[J"
+	                      "\x1b[4;1H\x1b[7m" "f.txt NORMAL" "     " "2,2" "\x1b[m" "\x1b[2;2H\x1b[?25h");
+}
+
+/** @brief The erase of the unused rows comes before the status line: ESC[J from the first free row would wipe it otherwise. */
+static void test_editor_draw_screen_erases_before_it_draws_the_status(void) {
+	editor_init(&e);
+	append("ab");
+	char out[2048];
+	editor_draw_screen(&e, 5, 20, out, sizeof(out));
+	const char *erase = strstr(out, "\x1b[2;1H\x1b[J");
+	const char *bar = strstr(out, "\x1b[5;1H\x1b[7m");
+	TEST_ASSERT_NOT_NULL(erase);
+	TEST_ASSERT_NOT_NULL(bar);
+	TEST_ASSERT_TRUE(erase < bar);
+	TEST_ASSERT_NULL_MESSAGE(strstr(bar, "\x1b[J"), "an erase after the status line would wipe it");
+}
+
+/** @brief A full text window has no erase of the free rows, and the status line still has its move. */
+static void test_editor_draw_screen_with_a_full_text_window(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "ab\x1b[K\r\n" "cd\x1b[K"
+	                      "\x1b[3;1H\x1b[7m" "[No Name] NORMAL 1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief An empty editor: erase from the first row, status on the last, cursor 1;1. */
+static void test_editor_draw_screen_of_an_empty_editor(void) {
+	editor_init(&e);
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J"
+	                      "\x1b[3;1H\x1b[7m" "[No Name] NORMAL 1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief Two rows: one text row and the status line. */
+static void test_editor_draw_screen_of_two_rows(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	assert_screen_literal(2, 20, "\x1b[?25l\x1b[H" "ab\x1b[K"
+	                      "\x1b[2;1H\x1b[7m" "[No Name] NORMAL 1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief One row or none: no status line, the output of editor_draw(). */
+static void test_editor_draw_screen_has_no_status_below_two_rows(void) {
+	editor_init(&e);
+	append("ab");
+	assert_screen_literal(1, 20, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[1;1H\x1b[?25h");
+	assert_screen_literal(0, 20, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[?25h"); /* as editor_draw() with no rows: nothing drawn, nothing erased */
+}
+
+/** @brief The status takes the whole width and has no ESC[K, at every width (the escape would erase its last character on a terminal that wraps late). */
+static void test_editor_draw_screen_status_is_the_whole_width_without_erase(void) {
+	editor_init(&e);
+	name_it("a\x01\xc3\xa9\xe2\x82\xac.txt");
+	append("x");
+	for (size_t cols = 1; cols <= 40; cols++) {
+		char out[2048], want[1024], msg[64];
+		snprintf(msg, sizeof(msg), "width %zu", cols);
+		editor_status(&e, cols, want, sizeof(want));
+		editor_draw_screen(&e, 3, cols, out, sizeof(out));
+		const char *start = strstr(out, "\x1b[3;1H\x1b[7m");
+		TEST_ASSERT_NOT_NULL_MESSAGE(start, msg);
+		start += strlen("\x1b[3;1H\x1b[7m");
+		const char *end = strstr(start, "\x1b[m");
+		TEST_ASSERT_NOT_NULL_MESSAGE(end, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(strlen(want), (size_t)(end - start), msg);
+		TEST_ASSERT_EQUAL_INT_MESSAGE(0, strncmp(want, start, strlen(want)), msg);
+		TEST_ASSERT_NULL_MESSAGE(memchr(start, '\x1b', (size_t)(end - start)), msg);
+	}
+}
+
+/** @brief The cursor is never put on the status line: below the text window of an editor that was not scrolled (a caller bug) it stays on the last text row. */
+static void test_editor_draw_screen_clamps_the_cursor_row_when_not_scrolled(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "ab\x1b[K\r\n" "cd\x1b[K"
+	                      "\x1b[3;1H\x1b[7m" "[No Name] NORMAL 3,1" "\x1b[m" "\x1b[2;1H\x1b[?25h");
+}
+
+/** @brief A scrolled window: the rows from rowoff, the cursor row relative to it, the status shows the real line. */
+static void test_editor_draw_screen_of_a_scrolled_window(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_scroll(&e, editor_text_rows(3));
+	assert_screen_literal(3, 20, "\x1b[?25l\x1b[H" "cd\x1b[K\r\n" "ef\x1b[K"
+	                      "\x1b[3;1H\x1b[7m" "[No Name] NORMAL 3,1" "\x1b[m" "\x1b[2;1H\x1b[?25h");
+}
+
+/** @brief A full-width text row keeps having no ESC[K, and the status still comes after it. */
+static void test_editor_draw_screen_with_a_full_width_row(void) {
+	editor_init(&e);
+	append("abcd");
+	assert_screen_literal(3, 4, "\x1b[?25l\x1b[H" "abcd" "\x1b[2;1H\x1b[J"
+	                      "\x1b[3;1H\x1b[7m" " 1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
+}
+
+/** @brief The draw is never a clear-screen, and a name or a text with escape sequences is shown, not sent. */
+static void test_editor_draw_screen_never_clears_or_sends_escapes_from_the_name(void) {
+	editor_init(&e);
+	name_it("a\x1b[2Jb");
+	append("\xc2\x9b[2Jc");
+	char out[2048];
+	editor_draw_screen(&e, 5, 40, out, sizeof(out));
+	TEST_ASSERT_NULL(strstr(out, "\x1b[2J"));
+	TEST_ASSERT_NULL(strstr(out, "\xc2\x9b"));
+	TEST_ASSERT_NOT_NULL(strstr(out, "\x1b[7m" "a^[[2Jb NORMAL"));
+}
+
+/** @brief The status line is reserved first: at every buffer size it is drawn whole or not at all, and the text rows keep the room that remains. */
+static void test_editor_draw_screen_keeps_what_fits_at_every_buffer_size(void) {
+	const char *rows[] = { "abc", "de", "", "fghi" };
+	editor_init(&e);
+	for (size_t i = 0; i < 4; i++) append(rows[i]);
+	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT); /* line 2, column 2 */
+	char status[64];
+	editor_status(&e, 10, status, sizeof(status));
+	TEST_ASSERT_EQUAL_UINT(10, strlen(status));
+	size_t status_bytes = strlen("\x1b[24;1H\x1b[7m") + strlen(status) + strlen("\x1b[m");
+	size_t bytes[5] = { 0 };
+	char text[5][64];
+	for (size_t k = 0; k <= 4; k++) {
+		text[k][0] = '\0';
+		for (size_t i = 0; i < k; i++) {
+			if (i > 0) strcat(text[k], "\r\n");
+			strcat(text[k], rows[i]);
+		}
+		if (k > 0) bytes[k] = bytes[k - 1] + strlen(rows[k - 1]) + 3 + (k > 1 ? 2 : 0);
+	}
+	for (size_t size = EDITOR_DRAW_OVERHEAD; size <= EDITOR_DRAW_OVERHEAD + status_bytes + bytes[4] + 8; size++) {
+		int fits = size - EDITOR_DRAW_OVERHEAD >= status_bytes;
+		size_t room = size - EDITOR_DRAW_OVERHEAD - (fits ? status_bytes : 0);
+		size_t k = 0;
+		while (k < 4 && bytes[k + 1] <= room) k++;
+		char wanted[512], out[512], msg[96];
+		draw_expected_status(wanted, sizeof(wanted), k ? text[k] : NULL, 23, 10, fits ? status : NULL, 24, 2, 2);
+		memset(out, 'x', sizeof(out));
+		size_t n = editor_draw_screen(&e, 24, 10, out, size);
+		snprintf(msg, sizeof(msg), "out_size %zu: expected the first %zu rows, status %s", size, k, fits ? "drawn" : "left out");
+		TEST_ASSERT_TRUE_MESSAGE(n < size, "wrote past the buffer");
+		TEST_ASSERT_EQUAL_STRING_MESSAGE(wanted, out, msg);
+		TEST_ASSERT_EQUAL_UINT(strlen(out), n);
+	}
+}
+
+/** @brief A buffer smaller than EDITOR_DRAW_OVERHEAD gets nothing, with a status line too. */
+static void test_editor_draw_screen_buffer_too_small_writes_nothing(void) {
+	editor_init(&e);
+	append("ab");
+	char out[EDITOR_DRAW_OVERHEAD] = "garbage";
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw_screen(&e, 24, 20, out, EDITOR_DRAW_OVERHEAD - 1));
+	TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+/** @brief EDITOR_STATUS_OVERHEAD covers the move to a 20-digit row, ESC[7m and ESC[m. */
+static void test_editor_status_overhead_covers_the_status_escapes(void) {
+	size_t worst = strlen("\x1b[18446744073709551615;1H") + strlen("\x1b[7m") + strlen("\x1b[m");
+	TEST_ASSERT_TRUE_MESSAGE(EDITOR_STATUS_OVERHEAD >= worst, "EDITOR_STATUS_OVERHEAD is smaller than the escapes of the status line");
+}
+
+/** @brief A buffer of exactly rows * (cols * 4 + 5) + the two overheads holds a whole screen of full-width 4-byte rows and a status line of 4-byte characters. */
+static void test_editor_draw_screen_worst_case_fits_the_documented_size(void) {
+	enum { ROWS = 3, COLS = 12 };
+	editor_init(&e);
+	name_it("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80"
+	        "\xf0\x9f\x98\x80\xf0\x9f\x98\x80.txt");
+	char line[COLS * 4 + 1] = "", text[2 * (COLS * 4 + 2) + 1] = "", status[COLS * 4 + 1];
+	for (int i = 0; i < COLS; i++) strcat(line, "\xf0\x9f\x98\x80");
+	append(line);
+	append(line);
+	snprintf(text, sizeof(text), "%s\r\n%s", line, line);
+	editor_status(&e, COLS, status, sizeof(status));
+	char out[ROWS * (COLS * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD], wanted[1024];
+	draw_expected_status(wanted, sizeof(wanted), text, ROWS - 1, COLS, status, ROWS, 1, 1);
+	size_t n = editor_draw_screen(&e, ROWS, COLS, out, sizeof(out));
+	TEST_ASSERT_TRUE(n < sizeof(out));
+	TEST_ASSERT_EQUAL_STRING(wanted, out);
+}
+
+/** @brief The worst tail: a terminal of SIZE_MAX rows, so a 20-digit status row and a 20-digit cursor row, fits the buffer of the two overheads and the status text. */
+static void test_editor_draw_screen_worst_case_tail_is_complete(void) {
+	editor_init(&e);
+	append("a");
+	e.cy = (size_t)-1 - 2;
+	char status[64];
+	editor_status(&e, 10, status, sizeof(status));
+	char out[EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD + 10];
+	memset(out, 'x', sizeof(out));
+	size_t n = editor_draw_screen(&e, (size_t)-1, 10, out, sizeof(out));
+	char wanted[256];
+	snprintf(wanted, sizeof(wanted), "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J" "\x1b[%zu;1H\x1b[7m%s\x1b[m" "\x1b[%zu;1H" "\x1b[?25h",
+	         (size_t)-1, status, (size_t)-1 - 1);
+	TEST_ASSERT_TRUE(n < sizeof(out));
+	TEST_ASSERT_EQUAL_STRING(wanted, out);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -2234,4 +2909,55 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_wanted_column_beyond_a_line_that_ends_in_a_mark);
 	RUN_TEST(test_editor_wanted_column_beyond_a_line_that_ends_in_a_four_byte_character);
 	RUN_TEST(test_editor_wanted_column_zero_goes_to_the_start_of_the_line);
+	RUN_TEST(test_editor_init_has_no_path);
+	RUN_TEST(test_editor_load_remembers_the_path_as_a_copy);
+	RUN_TEST(test_editor_load_of_a_missing_file_keeps_the_path);
+	RUN_TEST(test_editor_load_again_replaces_the_path);
+	RUN_TEST(test_editor_failed_load_leaves_no_path);
+	RUN_TEST(test_editor_free_drops_the_path);
+	RUN_TEST(test_editor_text_rows_reserves_the_status_row);
+	RUN_TEST(test_editor_status_without_a_name);
+	RUN_TEST(test_editor_status_shows_the_path);
+	RUN_TEST(test_editor_status_shows_line_and_column);
+	RUN_TEST(test_editor_status_with_a_two_digit_line);
+	RUN_TEST(test_editor_status_column_is_not_clipped);
+	RUN_TEST(test_editor_status_position_ends_in_the_last_column);
+	RUN_TEST(test_editor_status_column_after_a_tab);
+	RUN_TEST(test_editor_status_column_on_a_tab);
+	RUN_TEST(test_editor_status_column_after_a_mark);
+	RUN_TEST(test_editor_status_column_counts_characters);
+	RUN_TEST(test_editor_status_column_counts_invalid_bytes_and_c1);
+	RUN_TEST(test_editor_status_has_the_mode_label_after_the_name);
+	RUN_TEST(test_editor_status_shows_marks_in_the_name);
+	RUN_TEST(test_editor_status_shows_a_tab_in_the_name_as_spaces);
+	RUN_TEST(test_editor_status_shows_a_utf8_name);
+	RUN_TEST(test_editor_status_shows_invalid_bytes_and_c1_in_the_name_as_question_marks);
+	RUN_TEST(test_editor_status_never_cuts_a_mark);
+	RUN_TEST(test_editor_status_truncates_at_every_width);
+	RUN_TEST(test_editor_status_on_a_narrow_terminal);
+	RUN_TEST(test_editor_status_is_exactly_the_width);
+	RUN_TEST(test_editor_status_into_a_small_buffer);
+	RUN_TEST(test_editor_draw_screen_exact_bytes);
+	RUN_TEST(test_editor_draw_screen_erases_before_it_draws_the_status);
+	RUN_TEST(test_editor_draw_screen_with_a_full_text_window);
+	RUN_TEST(test_editor_draw_screen_of_an_empty_editor);
+	RUN_TEST(test_editor_draw_screen_of_two_rows);
+	RUN_TEST(test_editor_draw_screen_has_no_status_below_two_rows);
+	RUN_TEST(test_editor_draw_screen_status_is_the_whole_width_without_erase);
+	RUN_TEST(test_editor_draw_screen_clamps_the_cursor_row_when_not_scrolled);
+	RUN_TEST(test_editor_draw_screen_of_a_scrolled_window);
+	RUN_TEST(test_editor_draw_screen_with_a_full_width_row);
+	RUN_TEST(test_editor_draw_screen_never_clears_or_sends_escapes_from_the_name);
+	RUN_TEST(test_editor_draw_screen_keeps_what_fits_at_every_buffer_size);
+	RUN_TEST(test_editor_draw_screen_buffer_too_small_writes_nothing);
+	RUN_TEST(test_editor_status_overhead_covers_the_status_escapes);
+	RUN_TEST(test_editor_draw_screen_worst_case_fits_the_documented_size);
+	RUN_TEST(test_editor_draw_screen_worst_case_tail_is_complete);
+	RUN_TEST(test_editor_load_of_its_own_path_works);
+	RUN_TEST(test_editor_status_of_an_empty_path_is_no_name);
+	RUN_TEST(test_editor_mode_label_is_normal);
+	RUN_TEST(test_editor_status_shows_dos_for_a_crlf_file);
+	RUN_TEST(test_editor_status_shows_no_dos_for_other_files);
+	RUN_TEST(test_editor_status_dos_with_a_utf8_name_and_truncation);
+	RUN_TEST(test_editor_status_column_on_a_mark);
 }

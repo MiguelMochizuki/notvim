@@ -23,9 +23,11 @@ void editor_init(editor_t *e) {
 	e->cy = 0;
 	e->cx = 0;
 	e->rowoff = 0;
+	e->path = NULL;
 }
 
 void editor_free(editor_t *e) {
+	free(e->path);
 	for (size_t i = 0; i < e->count; i++) free(e->lines[i]);
 	free(e->lines);
 	editor_init(e);
@@ -188,11 +190,23 @@ static void drop_crs(editor_t *e, size_t n) {
 }
 
 int editor_load_file(editor_t *e, const char *path) {
+	char *copy = strdup(path); /* before the old contents go: @p path may be e->path itself */
 	editor_free(e); /* drop any previous contents */
+	if (!copy) {
+		errno = ENOMEM;
+		return -1;
+	}
 
-	FILE *fp = fopen(path, "r");
+	FILE *fp = fopen(copy, "r"); /* not @p path: it may have been freed with the old path */
 	if (!fp) {
-		return errno == ENOENT ? 0 : -1; /* Nonexistent file is not an error */
+		if (errno != ENOENT) {
+			int err = errno;
+			free(copy);
+			errno = err;
+			return -1;
+		}
+		e->path = copy; /* Nonexistent file is not an error: the name is kept for the saver */
+		return 0;
 	}
 
 	char *line = NULL;
@@ -229,8 +243,9 @@ int editor_load_file(editor_t *e, const char *path) {
 	int saved = errno;
 	free(line);
 	fclose(fp);
+	e->path = copy;
 	if (rc < 0) {
-		editor_free(e);
+		editor_free(e); /* frees the path too */
 	}
 	errno = saved;
 	return rc;
@@ -241,14 +256,29 @@ int editor_load_file(editor_t *e, const char *path) {
 /** Length of HIDE_HOME. */
 #define HIDE_HOME_LEN 9
 
-size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
+/**
+ * @brief Draw @p max_rows text rows and, if @p status_row is not 0, the status line on that terminal row; see editor_draw() and editor_draw_screen().
+ *
+ * The status line is reserved before the rows and left out whole if it does not fit; with a status line the cursor row never goes below the last text row.
+ */
+static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t status_row, char *out, size_t out_size) {
 	if (out_size < EDITOR_DRAW_OVERHEAD) {
 		if (out_size) out[0] = '\0';
 		return 0;
 	}
+	char head[48], *bar = NULL;
+	size_t reserve = 0, head_len = 0, bar_len = 0;
+	if (status_row) {
+		head_len = (size_t)snprintf(head, sizeof(head), "\x1b[%zu;1H\x1b[7m", status_row);
+		bar = malloc(max_cols * 4 + 1);
+		if (bar) {
+			bar_len = editor_status(e, max_cols, bar, max_cols * 4 + 1);
+			if (head_len + bar_len + 3 <= out_size - EDITOR_DRAW_OVERHEAD) reserve = head_len + bar_len + 3; /* "ESC[m" */
+		}
+	}
 	memcpy(out, HIDE_HOME, HIDE_HOME_LEN);
 	size_t pos = HIDE_HOME_LEN;
-	size_t rows_end = out_size - EDITOR_DRAW_OVERHEAD + HIDE_HOME_LEN; /* where the rows must stop: the rest is for the tail */
+	size_t rows_end = out_size - EDITOR_DRAW_OVERHEAD - reserve + HIDE_HOME_LEN; /* where the rows must stop: the rest is for the tail */
 	size_t avail = e->rowoff < e->count ? e->count - e->rowoff : 0;
 	if (avail > max_rows) avail = max_rows;
 	size_t drawn = 0;
@@ -263,9 +293,61 @@ size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *ou
 		if (width < max_cols) put(out, &pos, rows_end, "\x1b[K", 3); /* not after the last column: the cursor is still on it */
 	}
 	if (drawn < max_rows) pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;1H\x1b[J", drawn + 1);
+	if (reserve) { /* after the erase, which would wipe it; no erase of its own: it takes the whole width */
+		memcpy(out + pos, head, head_len);
+		pos += head_len;
+		memcpy(out + pos, bar, bar_len);
+		pos += bar_len;
+		memcpy(out + pos, "\x1b[m", 3);
+		pos += 3;
+	}
+	free(bar);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
+	if (status_row && row >= max_rows) row = max_rows - 1; /* never on the status line */
 	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
 	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
 	pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;%zuH\x1b[?25h", row + 1, col + 1);
+	return pos;
+}
+
+size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
+	return draw(e, max_rows, max_cols, 0, out, out_size);
+}
+
+size_t editor_draw_screen(const editor_t *e, size_t rows, size_t max_cols, char *out, size_t out_size) {
+	return draw(e, editor_text_rows(rows), max_cols, rows >= 2 ? rows : 0, out, out_size);
+}
+
+const char *editor_mode_label(const editor_t *e) {
+	(void)e;
+	return "NORMAL"; /* modes arrive with the insert mode */
+}
+
+size_t editor_text_rows(size_t rows) {
+	return rows > 1 ? rows - 1 : rows;
+}
+
+size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size) {
+	if (out_size == 0) return 0;
+	size_t max = out_size - 1, pos = 0;
+	char right[48];
+	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) + 1 : 1;
+	size_t right_w = (size_t)snprintf(right, sizeof(right), "%zu,%zu", e->cy + 1, col);
+	if (right_w >= cols) {
+		put(out, &pos, max, right, cols); /* the position alone, cut on the right */
+	} else {
+		const char *name = e->path && e->path[0] ? e->path : "[No Name]";
+		const char *mode = editor_mode_label(e);
+		char *left = malloc(strlen(name) + strlen(mode) + 8); /* name, " [dos]", " ", mode, NUL */
+		size_t used = 0;
+		if (left) {
+			sprintf(left, "%s%s %s", name, e->crlf ? " [dos]" : "", mode);
+			used = put_line(left, cols - right_w - 1, out, &pos, max);
+			free(left);
+		}
+		for (; used < cols - right_w; used++) put(out, &pos, max, " ", 1);
+		put(out, &pos, max, right, right_w);
+	}
+	out[pos] = '\0';
 	return pos;
 }

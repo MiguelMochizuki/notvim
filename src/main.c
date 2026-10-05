@@ -42,8 +42,8 @@ static int key_to_move(int key, editor_move_t *dir) {
 
 /** @brief Size in bytes of the draw buffer for a terminal of @p rows by @p cols. */
 static size_t draw_buffer_size(int rows, int cols) {
-	/* each of the rows lines holds up to cols characters of up to 4 bytes, plus "ESC[K" after it and "\r\n" between them */
-	return (size_t)rows * ((size_t)cols * 4 + 3 + 2) + EDITOR_DRAW_OVERHEAD;
+	/* each of the rows lines (the status line is one of them) holds up to cols characters of up to 4 bytes, plus "ESC[K" after it and "\r\n" between them */
+	return (size_t)rows * ((size_t)cols * 4 + 3 + 2) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD;
 }
 
 /** The terminal size and the buffer one redraw is built in; they always match each other. */
@@ -70,7 +70,7 @@ static int screen_fit(screen_t *s) {
 
 /** @brief Draw the whole screen with the cursor; 0 if it all got written, -1 if the terminal can't be written to. */
 static int screen_draw(const screen_t *s, const editor_t *e) {
-	size_t n = editor_draw(e, (size_t)s->rows, (size_t)s->cols, s->buf, s->size);
+	size_t n = editor_draw_screen(e, (size_t)s->rows, (size_t)s->cols, s->buf, s->size);
 	return terminal_write_all(STDOUT_FILENO, s->buf, n);
 }
 
@@ -166,7 +166,7 @@ int main(int argc, char **argv) {
 		} else if (pfds[2].revents & POLLIN) {
 			winch_drain();
 			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
-			editor_scroll(&e, (size_t)screen.rows);
+			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;
@@ -182,7 +182,7 @@ int main(int argc, char **argv) {
 		editor_move_t dir;
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
-			editor_scroll(&e, (size_t)screen.rows);
+			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;

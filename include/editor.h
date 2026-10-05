@@ -21,6 +21,8 @@ typedef struct {
 	                     directly must set @c wantcol too. */
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
 	                   0 for an LF, mixed or empty file, no file, or after an error. */
+	char *path;   /**< Owned copy of the path given to the last successful editor_load_file(), even if that file does not
+	                   exist (a saver creates it); NULL after editor_init(), after editor_free() and after a failed load. */
 } editor_t;
 
 /** Directions for editor_move_cursor(). */
@@ -53,6 +55,14 @@ void editor_scroll(editor_t *e, size_t rows);
  * are those whose bytes are at most the buffer size minus this constant.
  */
 #define EDITOR_DRAW_OVERHEAD 88
+
+/**
+ * Room editor_draw_screen() needs, on top of EDITOR_DRAW_OVERHEAD and of the text rows, for the status row: the move to
+ * it ("ESC[<row>;1H", at most 25 bytes), the 4-byte reverse-video start and the 3-byte reverse-video end, 32 bytes. The
+ * status text itself takes at most 4 bytes per column. A buffer of rows * (cols * 4 + 5) + EDITOR_DRAW_OVERHEAD +
+ * EDITOR_STATUS_OVERHEAD bytes always holds a whole screen of @c rows rows with its status row.
+ */
+#define EDITOR_STATUS_OVERHEAD 32
 
 /**
  * @brief Tell whether a key press should quit the editor.
@@ -183,13 +193,56 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
  * A file that contains a NUL byte is refused, so that a line is never shown
  * cut short and then saved over the original.
  *
+ * @c e->path is a copy of @p path once the call succeeds, also for a nonexistent file; the previous path is
+ * dropped first like the previous contents, so on an error it is NULL.
+ *
  * @param e    Editor to load into; must not be NULL. Left empty on error.
  * @param path Path of the file to load.
  *
  * @return 0 on success (including a nonexistent file), -1 on any other
- *         error (errno is set; EILSEQ for a file with a NUL byte).
+ *         error (errno is set; EILSEQ for a file with a NUL byte, ENOMEM if the path can't be copied).
  */
 int editor_load_file(editor_t *e, const char *path);
+
+/**
+ * @brief Height of the text window of a terminal of @p rows rows: the last row is the status line.
+ * @param rows Terminal height.
+ * @return @p rows - 1 for 2 or more rows; @p rows for 0 or 1 (a single row shows text and has no status line).
+ */
+size_t editor_text_rows(size_t rows);
+
+/**
+ * @brief Label of the mode of @p e, as the status line shows it.
+ * @param e Editor to describe; must not be NULL.
+ * @return "NORMAL" (there are no other modes yet); a string literal, never NULL.
+ */
+const char *editor_mode_label(const editor_t *e);
+
+/**
+ * @brief Write the status line of @p e, as drawn, into @p out as a NUL-terminated string of exactly @p cols columns.
+ *
+ * Pure text, no escape sequences (editor_draw_screen() puts it in reverse video). The layout is
+ * "<name> <mode>" (or "<name> [dos] <mode>" if @c crlf is set, a CRLF file that is kept as it is), then spaces, then "<line>,<col>" ending in the last column, where @c name is @c e->path ("[No Name]" if it is NULL
+ * or empty) and @c mode is editor_mode_label(). @c line is @c cy + 1 (1 for an editor with no lines) and
+ * @c col is the display column of the cursor plus 1 (1 if @c cy is not a line), counted as the cursor is drawn (a tab or a mark counts from its
+ * first column, a character or '?' is one column), not clipped to the width. The name goes through the same rules as
+ * the text of a line: a control byte is a two-column mark such as ^A, a tab is spaces to the next multiple of 8 columns
+ * from the start of the status, valid UTF-8 is copied and any other byte or a C1 control is '?'.
+ *
+ * It is cut to the width by columns, never inside a character or a mark, and padded with spaces. The position has
+ * priority: if it does not fit (@p cols no wider than it) it alone is written cut on the right ("1,1" at 2 columns is
+ * "1,"); otherwise the left part is cut on the right to the @p cols minus the position minus 1 columns that remain
+ * (so the mode label goes first, then [dos], then the name), at least one space separates it from the position, and the line
+ * is padded to @p cols. 0 columns give "".
+ *
+ * @param e        Editor to describe; must not be NULL.
+ * @param cols     Width of the terminal in columns.
+ * @param out      Destination buffer.
+ * @param out_size Size of @p out in bytes; @p cols * 4 + 1 always holds the whole line. A smaller buffer gets the line
+ *                 cut at a byte, leaving room for the NUL.
+ * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
+ */
+size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size);
 
 /**
  * @brief Write a full screen redraw into @p out as a NUL-terminated string.
@@ -234,5 +287,32 @@ int editor_load_file(editor_t *e, const char *path);
  *         smaller than EDITOR_DRAW_OVERHEAD.
  */
 size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size);
+
+/**
+ * @brief Write a full redraw of a terminal of @p rows rows into @p out: the text window and the status line.
+ *
+ * Like editor_draw() with @c editor_text_rows(rows) text rows (same text, row ends, erase of the unused text rows,
+ * rules about never cutting an escape sequence), then, for @p rows of 2 or more, the status line of editor_status() on
+ * the last row: the move "ESC[<rows>;1H", reverse video "ESC[7m", the @p max_cols columns of the status, "ESC[m". It
+ * comes after the erase of the unused text rows ("ESC[<n+1>;1H ESC[J"), which would otherwise wipe it, and it has no
+ * "ESC[K" because it takes the full width (a character in the last column leaves the cursor in pending wrap). Last
+ * come the cursor position and "ESC[?25h", as in editor_draw(), but the row of the cursor never goes below the last text
+ * row, so the cursor is never on the status line. With @p rows 0 or 1 there is no status line and the output is
+ * that of editor_draw() with the same @p rows.
+ *
+ * Call editor_scroll() with editor_text_rows(@p rows) first. The status line is reserved before the rows: it is drawn
+ * if its bytes (the move, ESC[7m, the status text, ESC[m) fit in @p out_size - EDITOR_DRAW_OVERHEAD, and the text rows
+ * then keep the room that remains; if it does not fit it is left out whole and the rows get all the room. Nothing is
+ * written if @p out_size is smaller than EDITOR_DRAW_OVERHEAD.
+ *
+ * @param e        Editor to draw; must not be NULL.
+ * @param rows     Height of the terminal, status line included.
+ * @param max_cols Width of the terminal; see editor_draw().
+ * @param out      Destination buffer.
+ * @param out_size Size of @p out in bytes; rows * (@p max_cols * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD
+ *                 always holds the whole screen.
+ * @return Number of bytes written, excluding the NUL; 0 if @p out_size is smaller than EDITOR_DRAW_OVERHEAD.
+ */
+size_t editor_draw_screen(const editor_t *e, size_t rows, size_t max_cols, char *out, size_t out_size);
 
 #endif

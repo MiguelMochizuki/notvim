@@ -29,4 +29,34 @@
  */
 void draw_expected(char *buf, size_t size, const char *text, size_t max_rows, size_t max_cols, int row, int col);
 
+/**
+ * @brief Build the expected output of editor_draw_screen(): draw_expected() for the text rows, with the status line before the cursor.
+ *
+ * After the text rows and the erase of the unused ones, "ESC[<status_row>;1H ESC[7m <status> ESC[m", then the cursor
+ * position and show cursor. No ESC[K follows the status: it takes the whole width.
+ *
+ * @param status     The status line as drawn, already padded to the width; NULL for none (a terminal of one row).
+ * @param status_row Row of the status line, 1-based: the terminal height.
+ * @note The other parameters are those of draw_expected(); @p max_rows is the number of TEXT rows.
+ */
+void draw_expected_status(char *buf, size_t size, const char *text, size_t max_rows, size_t max_cols, const char *status,
+                          size_t status_row, int row, int col);
+
+/**
+ * @brief Build the status line of a plain ASCII file name the way editor_status() must, for the pty tests.
+ *
+ * "<name> [dos] <mode>" ("[dos] " only if @p dos), padding, "<line>,<col>" at the right, cut as editor_status() documents;
+ * @p name must be printable ASCII.
+ *
+ * @param buf  Destination, NUL-terminated.
+ * @param size Size of @p buf.
+ * @param name File name, or NULL for "[No Name]".
+ * @param dos  Non-zero for a CRLF file: " [dos]" follows the name.
+ * @param mode Mode label, such as "NORMAL".
+ * @param line Line of the cursor, 1-based.
+ * @param col  Display column of the cursor, 1-based.
+ * @param cols Width of the terminal.
+ */
+void status_expected(char *buf, size_t size, const char *name, int dos, const char *mode, size_t line, size_t col, size_t cols);
+
 #endif
