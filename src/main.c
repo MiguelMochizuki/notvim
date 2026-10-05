@@ -147,6 +147,7 @@ int main(int argc, char **argv) {
 			winch_drain();
 			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
 			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
+			editor_scroll_cols(&e, (size_t)screen.cols);
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;
@@ -161,6 +162,7 @@ int main(int argc, char **argv) {
 		if (editor_handle_key(&e, key)) {
 			if (e.quit) break; /* ":q", ":wq", ":x", "ZZ", "ZQ" or Ctrl+Q: leave through the normal exit, status 0 */
 			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
+			editor_scroll_cols(&e, (size_t)screen.cols);
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;

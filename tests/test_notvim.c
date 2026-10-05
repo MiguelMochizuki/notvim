@@ -1476,6 +1476,117 @@ static void test_notvim_status_line_moves_to_the_new_last_row_on_resize(void) {
 	TEST_ASSERT_NULL(strstr(grown, "\x1b[10;1H\x1b[7m"));
 }
 
+/** @brief Write the 100-character line of the horizontal scroll tests into @p buf, 'a' to 'z' over and over. */
+static void hscroll_line(char *buf) {
+	for (int i = 0; i < 100; i++) buf[i] = (char)('a' + i % 26);
+	buf[100] = '\0';
+}
+
+/** @brief Write characters @p from to @p from + @p n - 1 of the horizontal scroll line into @p buf. */
+static void hscroll_slice(char *buf, int from, int n) {
+	char line[128];
+	hscroll_line(line);
+	memcpy(buf, line + from, (size_t)n);
+	buf[n] = '\0';
+}
+
+/** @brief Moving right past the edge of the window scrolls one column; the status line shows the absolute column. */
+static void test_notvim_scrolls_right_with_the_cursor(void) {
+	char line[128], text[128], at_edge[16384], scrolled[2048], expected_scrolled[2048];
+	hscroll_line(line);
+	char content[130];
+	snprintf(content, sizeof(content), "%s\n", line);
+	const char *path = tmpdir_write("long.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048];
+	pid_t pid = spawn_notvim_size(path, 24, 30, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "lllllllllllllllllllllllllllll", at_edge, sizeof(at_edge)); /* 29 moves: the last column */
+	size_t n = send_and_read(master, "l", scrolled, sizeof(scrolled));
+	hscroll_slice(text, 1, 30);
+	screen_at(expected_scrolled, sizeof(expected_scrolled), text, 1, 30, 1, 31);
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(strlen(expected_scrolled), n);
+	TEST_ASSERT_EQUAL_STRING(expected_scrolled, scrolled);
+}
+
+/** @brief Typing at the right edge in insert mode scrolls: the cursor stays on the last column, after the text. */
+static void test_notvim_typing_at_the_right_edge_scrolls(void) {
+	int master;
+	char first[2048], before[4096], after[2048], expected[2048];
+	pid_t pid = spawn_notvim_size(NULL, 24, 20, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "ixxxxxxxxxxxxxxxxxxx", before, sizeof(before)); /* 19 characters: the cursor is on the last column */
+	size_t n = send_and_read(master, "x", after, sizeof(after));
+	shown_modified = 1;
+	shown_mode = "INSERT";
+	screen_at(expected, sizeof(expected), "xxxxxxxxxxxxxxxxxxx", 1, 20, 1, 21);
+	send_and_read(master, "\x1b", before, sizeof(before));
+	int status = discard_and_wait(master, pid); /* ":q!" is typed text in insert mode: leave with Esc first */
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
+/** @brief After a resize to a narrower terminal the view follows the cursor and the status line follows the new width. */
+static void test_notvim_resize_scrolls_to_keep_the_cursor(void) {
+	char line[128], text[128], content[130], moved[16384], resized[2048], expected[2048];
+	hscroll_line(line);
+	snprintf(content, sizeof(content), "%s\n", line);
+	const char *path = tmpdir_write("long.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048];
+	pid_t pid = spawn_notvim_size(path, 24, 40, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "lllllllllllllllllllllllllllllllllllllll", moved, sizeof(moved)); /* 39 moves: the last column */
+	set_size(master, 24, 20);
+	size_t n = read_output(master, resized, sizeof(resized));
+	hscroll_slice(text, 20, 20);
+	screen_at(expected, sizeof(expected), text, 1, 20, 1, 40);
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, resized);
+}
+
+/** @brief On a file with a long line, moving back left past the edge scrolls back one column. */
+static void test_notvim_scrolls_left_with_the_cursor(void) {
+	char line[128], text[128], content[130], right[16384], left[16384], expected[2048];
+	hscroll_line(line);
+	snprintf(content, sizeof(content), "%s\n", line);
+	const char *path = tmpdir_write("long.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048];
+	pid_t pid = spawn_notvim_size(path, 24, 30, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "llllllllllllllllllllllllllllllllllllllll", right, sizeof(right)); /* 40 moves: the view starts at 11 */
+	send_and_read(master, "hhhhhhhhhhhhhhhhhhhhhhhhhhhhh", left, sizeof(left)); /* 29: the cursor is at the first column */
+	size_t n = send_and_read(master, "h", left, sizeof(left));
+	hscroll_slice(text, 10, 30);
+	screen_at(expected, sizeof(expected), text, 1, 1, 1, 11);
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
+	TEST_ASSERT_EQUAL_STRING(expected, left);
+}
+
+
 /** @brief On a terminal of one row there is no status line: the one row is text, and the cursor moves and scrolls in it. */
 static void test_notvim_one_row_terminal_has_no_status_line(void) {
 	const char *path = tmpdir_write("one.txt", "ab\ncd\n");
@@ -2170,6 +2281,10 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_status_line_follows_the_cursor);
 	RUN_TEST(test_notvim_status_line_column_is_the_display_column);
 	RUN_TEST(test_notvim_status_line_moves_to_the_new_last_row_on_resize);
+	RUN_TEST(test_notvim_scrolls_right_with_the_cursor);
+	RUN_TEST(test_notvim_typing_at_the_right_edge_scrolls);
+	RUN_TEST(test_notvim_resize_scrolls_to_keep_the_cursor);
+	RUN_TEST(test_notvim_scrolls_left_with_the_cursor);
 	RUN_TEST(test_notvim_one_row_terminal_has_no_status_line);
 	RUN_TEST(test_notvim_two_row_terminal_has_one_text_row_and_the_status_line);
 	RUN_TEST(test_notvim_status_line_on_a_narrow_terminal);

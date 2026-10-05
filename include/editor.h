@@ -24,6 +24,8 @@ typedef struct {
 	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte), or
 	                   the length of the line in insert mode. */
 	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
+	size_t coloff; /**< Display column of the first visible column of every line (horizontal scroll offset); 0 after init, free and load.
+	                    Kept by editor_scroll_cols(); render and draw show each line from this column on. */
 	size_t wantcol; /**< Wanted display column (Vim's curswant): where up and down try to put the cursor, so that it comes
 	                     back to its column after a shorter line. Set by a left or right move that moves; 0 after init, free
 	                     and load. @c cx and @c wantcol change together in editor_move_cursor(): code that assigns @c cx
@@ -64,6 +66,20 @@ typedef enum {
  * @param rows Height of the window in lines, usually the terminal height.
  */
 void editor_scroll(editor_t *e, size_t rows);
+
+/**
+ * @brief Scroll horizontally so that the cursor is inside the text window.
+ *
+ * Changes only @c coloff, by the least amount (one column at a time as the cursor moves, unlike Vim's default
+ * 'sidescroll' of 0, which recentres the cursor): left if the display column of the cursor is left of the window, right
+ * if the cell under the cursor does not fit before the right edge. A control-byte mark must fit whole; a tab only needs
+ * its first column, and the cursor after the last character (insert mode) needs one. Does nothing if @p cols is 0 or
+ * there is no cursor line. The caller calls it after every key that may move the cursor or edit, and after a resize.
+ *
+ * @param e    Editor to modify; must not be NULL.
+ * @param cols Width of the text window in columns, usually the terminal width.
+ */
+void editor_scroll_cols(editor_t *e, size_t cols);
 
 /**
  * Room editor_draw_text() needs on top of the rows: the 6-byte hide-cursor and the
@@ -226,9 +242,10 @@ int editor_handle_key(editor_t *e, int key);
  *                 height; 0 renders nothing. The first line rendered is
  *                 line @c rowoff; a @c rowoff past the last line renders nothing.
  * @param max_cols Maximum number of columns of each line to render, usually
- *                 the terminal width (columns, not bytes). Longer lines are clipped on the right,
- *                 so no line wraps and scrolls the terminal; there is no
- *                 horizontal scrolling yet.
+ *                 the terminal width (columns, not bytes). Each line is shown from display column @c coloff on
+ *                 and clipped on the right, so no line wraps and scrolls the terminal. A tab that straddles
+ *                 @c coloff shows its remaining spaces; a mark that straddles it shows one space, so the cells after
+ *                 it stay in place; a cell cut by the right edge follows the rules above.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
@@ -325,7 +342,7 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
  * which clears what an older, longer screen left below); a full screen has
  * nothing to erase and gets neither. Last it moves the cursor to row
  * cy-rowoff+1 (row 1 if the cursor is above the window) at the display
- * column of cx plus 1 ("ESC[row;colH"; counted in characters; marks are two
+ * column of cx minus @c coloff plus 1 ("ESC[row;colH"; counted in characters; marks are two
  * columns wide and a tab goes to the next tab stop; the cursor is on the
  * first column of a mark or tab) and shows it ("ESC[?25h"). An editor with no
  * lines draws "ESC[?25l ESC[H ESC[1;1H ESC[J ESC[1;1H ESC[?25h". There is never

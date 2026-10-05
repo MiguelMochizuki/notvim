@@ -3,6 +3,7 @@
  * @brief Unit tests for editor.c.
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <errno.h>
 #include <string.h>
 #include <sys/stat.h>
@@ -3886,6 +3887,216 @@ static void test_editor_draw_screen_command_row_fits_the_documented_buffer(void)
 	TEST_ASSERT_EQUAL_UINT(strlen(out), n);
 }
 
+/** @brief Send @p key @p n times, scrolling to a window of @p cols columns after each, as main does. */
+static void key_scroll(int key, int n, size_t cols) {
+	for (int i = 0; i < n; i++) {
+		editor_handle_key(&e, key);
+		editor_scroll_cols(&e, cols);
+	}
+}
+
+/** @brief Assert that editor_render() of one row of @p cols columns gives @p expected. */
+static void assert_render1(size_t cols, const char *expected) {
+	char out[256];
+	editor_render(&e, 1, cols, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
+/** @brief Moving right over a long line scrolls one column at a time, and moving left scrolls back only when the cursor leaves the window. */
+static void test_editor_hscroll_right_and_left_over_a_long_line(void) {
+	editor_init(&e);
+	append("0123456789abcdefghij");
+	key_scroll('l', 4, 5);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+	key_scroll('l', 1, 5);
+	TEST_ASSERT_EQUAL_UINT(1, e.coloff);
+	assert_render1(5, "12345");
+	key_scroll('l', 14, 5);
+	TEST_ASSERT_EQUAL_UINT(15, e.coloff);
+	assert_render1(5, "fghij");
+	key_scroll('h', 4, 5);
+	TEST_ASSERT_EQUAL_UINT(15, e.coloff);
+	key_scroll('h', 1, 5);
+	TEST_ASSERT_EQUAL_UINT(14, e.coloff);
+	key_scroll('h', 14, 5);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+}
+
+/** @brief Going up or down onto a shorter line brings the view back to the cursor. */
+static void test_editor_hscroll_vertical_move_to_a_short_line(void) {
+	editor_init(&e);
+	append("0123456789abcdefghij");
+	append("ab");
+	key_scroll('l', 19, 5);
+	TEST_ASSERT_EQUAL_UINT(15, e.coloff);
+	key_scroll('j', 1, 5);
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_UINT(1, e.coloff);
+	e.rowoff = 1;
+	assert_render1(5, "b");
+}
+
+/** @brief A tab or a mark that straddles the left edge never shows cut: the tab shows the spaces it has left, a mark one space. */
+static void test_editor_hscroll_tab_and_mark_at_the_left_edge(void) {
+	editor_init(&e);
+	append("\tab");
+	e.coloff = 5;
+	assert_render1(10, "   ab");
+	e.coloff = 8;
+	assert_render1(10, "ab");
+	editor_free(&e);
+	append("a\x01" "bc");
+	e.coloff = 1;
+	assert_render1(10, "^Abc");
+	e.coloff = 2;
+	assert_render1(10, " bc");
+	e.coloff = 3;
+	assert_render1(10, "bc");
+}
+
+/** @brief A tab straddling the left edge is cut on the right too, and a mark at the right edge is dropped, never half shown. */
+static void test_editor_hscroll_cuts_at_the_right_edge(void) {
+	editor_init(&e);
+	append("\tab");
+	e.coloff = 5;
+	assert_render1(2, "  ");
+	editor_free(&e);
+	append("ab\x01" "cd");
+	assert_render1(3, "ab");
+	e.coloff = 1;
+	assert_render1(3, "b^A");
+	assert_render1(2, "b");
+}
+
+/** @brief UTF-8 characters are never cut at the left edge, and a multibyte cursor character scrolls into view whole. */
+static void test_editor_hscroll_utf8(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xc3\xa0\xc3\xbc\xe2\x82\xac" "z"); /* e acute, a grave, u diaeresis, euro, z */
+	key_scroll('l', 3, 2);
+	TEST_ASSERT_EQUAL_UINT(2, e.coloff);
+	assert_render1(2, "\xc3\xbc\xe2\x82\xac");
+	e.coloff = 1;
+	assert_render1(3, "\xc3\xa0\xc3\xbc\xe2\x82\xac");
+}
+
+/** @brief A mark under the cursor must fit whole: the view moves until it does; a tab needs only its first column. */
+static void test_editor_hscroll_mark_under_the_cursor_fits_whole(void) {
+	editor_init(&e);
+	append("ab\x01" "cd");
+	key_scroll('l', 2, 3);
+	TEST_ASSERT_EQUAL_UINT(1, e.coloff);
+	assert_render1(3, "b^A");
+	editor_free(&e);
+	append("abc\t" "d");
+	key_scroll('l', 3, 4);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+	assert_render1(4, "abc ");
+}
+
+/** @brief In insert mode the cursor after the last character needs a column of its own. */
+static void test_editor_hscroll_cursor_after_the_end_of_the_line(void) {
+	editor_init(&e);
+	append("abcd");
+	press("i");
+	key_scroll(KEY_RIGHT, 4, 4);
+	TEST_ASSERT_EQUAL_UINT(4, e.cx);
+	TEST_ASSERT_EQUAL_UINT(1, e.coloff);
+	assert_render1(4, "bcd");
+	char out[256];
+	editor_draw_text(&e, 3, 4, out, sizeof(out));
+	TEST_ASSERT_NOT_NULL(strstr(out, "bcd\x1b[K"));
+	TEST_ASSERT_NOT_NULL(strstr(out, "\x1b[1;4H"));
+}
+
+/** @brief Typing at the right edge scrolls when the window is scrolled after each key. */
+static void test_editor_hscroll_typing_at_the_right_edge(void) {
+	editor_init(&e);
+	press("i");
+	for (const char *c = "abcdef"; *c; c++) key_scroll(*c, 1, 4);
+	assert_line(&e, 0, "abcdef");
+	TEST_ASSERT_EQUAL_UINT(3, e.coloff);
+	assert_render1(4, "def");
+	editor_free(&e);
+	press("i");
+	for (const char *c = "\xc3\xa9\xc3\xa9\xc3\xa9"; *c; c++) key_scroll((unsigned char)*c, 1, 2);
+	TEST_ASSERT_EQUAL_UINT(2, e.coloff);
+	assert_render1(2, "\xc3\xa9");
+}
+
+/** @brief After a resize the view follows: a narrower window moves it, a wider one leaves it, and 0 columns do nothing. */
+static void test_editor_hscroll_resize(void) {
+	editor_init(&e);
+	append("0123456789");
+	key_scroll('l', 7, 10);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+	editor_scroll_cols(&e, 4);
+	TEST_ASSERT_EQUAL_UINT(4, e.coloff);
+	editor_scroll_cols(&e, 20);
+	TEST_ASSERT_EQUAL_UINT(4, e.coloff);
+	editor_scroll_cols(&e, 0);
+	TEST_ASSERT_EQUAL_UINT(4, e.coloff);
+	editor_free(&e);
+	editor_scroll_cols(&e, 5); /* no lines: nothing to scroll to */
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+}
+
+/** @brief The exact bytes of a draw from a scrolled view: the cursor column is relative to coloff, a full row has no erase. */
+static void test_editor_hscroll_draw_exact_bytes(void) {
+	editor_init(&e);
+	append("0123456789");
+	key_scroll('l', 7, 5);
+	assert_draw_literal(3, 5, "\x1b[?25l\x1b[H" "34567" "\x1b[2;1H\x1b[J" "\x1b[1;5H" "\x1b[?25h");
+	e.coloff = 3; /* the cursor inside the window: its column is relative to coloff, not clamped */
+	e.cx = 5;
+	assert_draw_literal(3, 10, "\x1b[?25l\x1b[H" "3456789\x1b[K" "\x1b[2;1H\x1b[J" "\x1b[1;3H" "\x1b[?25h");
+	editor_free(&e);
+	append("\tab");
+	e.coloff = 5; /* a straddling tab: its spaces, then the erase, as the row is narrower than the window */
+	assert_draw_literal(3, 10, "\x1b[?25l\x1b[H" "   ab\x1b[K" "\x1b[2;1H\x1b[J" "\x1b[1;1H" "\x1b[?25h");
+}
+
+/** @brief The status line keeps the absolute column of the cursor while the view is scrolled. */
+static void test_editor_hscroll_status_shows_the_absolute_position(void) {
+	editor_init(&e);
+	append("0123456789");
+	key_scroll('l', 7, 5);
+	TEST_ASSERT_EQUAL_UINT(3, e.coloff);
+	char out[128];
+	editor_status(&e, 20, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING("[No Name] NORMAL 1,8", out);
+}
+
+/** @brief A screen drawn from the middle of a line of 4-byte characters fits the documented buffer size, whole. */
+static void test_editor_hscroll_draw_screen_fits_the_documented_buffer(void) {
+	editor_init(&e);
+	append("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80");
+	e.coloff = 2;
+	size_t rows = 2, cols = 5;
+	size_t size = rows * (cols * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD;
+	char *out = malloc(size);
+	TEST_ASSERT_NOT_NULL(out);
+	size_t n = editor_draw_screen(&e, rows, cols, out, size);
+	int ok = strstr(out, "\x1b[H" "\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80" "\x1b[2;1H") != NULL;
+	free(out);
+	TEST_ASSERT_TRUE(ok);
+	TEST_ASSERT_TRUE(n > 0);
+}
+
+/** @brief Free and load put the view back at column 0. */
+static void test_editor_hscroll_is_reset_by_init_free_and_load(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+	e.coloff = 5;
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+	const char *path = tmpdir_write("wide.txt", "0123456789\n");
+	TEST_ASSERT_NOT_NULL(path);
+	append("0123456789");
+	e.coloff = 5;
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+}
+
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_init_is_empty);
 	RUN_TEST(test_editor_append_one_line);
@@ -4189,4 +4400,17 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_draw_screen_one_row_has_no_bottom_row);
 	RUN_TEST(test_editor_resize_in_command_mode_keeps_the_command_line);
 	RUN_TEST(test_editor_draw_screen_command_row_fits_the_documented_buffer);
+	RUN_TEST(test_editor_hscroll_right_and_left_over_a_long_line);
+	RUN_TEST(test_editor_hscroll_vertical_move_to_a_short_line);
+	RUN_TEST(test_editor_hscroll_tab_and_mark_at_the_left_edge);
+	RUN_TEST(test_editor_hscroll_cuts_at_the_right_edge);
+	RUN_TEST(test_editor_hscroll_utf8);
+	RUN_TEST(test_editor_hscroll_mark_under_the_cursor_fits_whole);
+	RUN_TEST(test_editor_hscroll_cursor_after_the_end_of_the_line);
+	RUN_TEST(test_editor_hscroll_typing_at_the_right_edge);
+	RUN_TEST(test_editor_hscroll_resize);
+	RUN_TEST(test_editor_hscroll_draw_exact_bytes);
+	RUN_TEST(test_editor_hscroll_status_shows_the_absolute_position);
+	RUN_TEST(test_editor_hscroll_draw_screen_fits_the_documented_buffer);
+	RUN_TEST(test_editor_hscroll_is_reset_by_init_free_and_load);
 }

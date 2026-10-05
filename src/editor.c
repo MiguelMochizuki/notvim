@@ -26,6 +26,7 @@ void editor_init(editor_t *e) {
 	e->cy = 0;
 	e->cx = 0;
 	e->rowoff = 0;
+	e->coloff = 0;
 	e->path = NULL;
 	e->msg = NULL;
 	cmdline_clear(&e->cmd);
@@ -109,6 +110,19 @@ static size_t display_col(const char *line, size_t cx) {
 	return col;
 }
 
+void editor_scroll_cols(editor_t *e, size_t cols) {
+	if (cols == 0 || e->cy >= e->count) return;
+	const char *line = e->lines[e->cy];
+	size_t col = display_col(line, e->cx);
+	size_t w = line[e->cx] && line[e->cx] != '\t' ? cell_width(line + e->cx, col) : 1; /* a mark must show whole; a tab may be cut */
+	if (w > cols) w = cols;
+	if (col < e->coloff) {
+		e->coloff = col;
+	} else if (col + w > e->coloff + cols) {
+		e->coloff = col + w - cols;
+	}
+}
+
 /** @brief Start of the last cell on line @p y (a character or an invalid byte), or 0 for an empty line. */
 static size_t last_col(const editor_t *e, size_t y) {
 	return utf8_prev(e->lines[y], strlen(e->lines[y]));
@@ -153,32 +167,48 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->cx != old_cx) e->wantcol = display_col(line, e->cx); /* only a move that moves forgets the old column, as in Vim */
 }
 
-/** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a character or a mark; return the columns it takes. */
-static size_t put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
+/**
+ * @brief Append @p line to @p out at *pos as drawn from display column @p skip on, clipped to @p max_cols columns without cutting a character or a mark; return the columns it takes.
+ *
+ * A tab that straddles @p skip shows its remaining spaces; a mark that straddles it shows one space in its remaining column, so the cells after it stay in place.
+ */
+static size_t put_line(const char *line, size_t skip, size_t max_cols, char *out, size_t *pos, size_t max) {
 	static const char spaces[TAB_STOP + 1] = "        ";
-	size_t col = 0;
+	size_t col = 0, shown = 0; /* col counts from the start of the line, shown from @p skip */
 	for (const char *p = line; *p; p += utf8_cell_len(p)) {
 		size_t w = cell_width(p, col);
-		size_t room = max_cols - col;
-		if (*p == '\t') {
+		size_t room = max_cols - shown;
+		if (col + w <= skip) {
+			col += w; /* left of the window */
+		} else if (col < skip) {
+			size_t n = col + w - skip; /* what is left of a cell that straddles the left edge */
+			if (n > room) n = room;
+			put(out, pos, max, spaces, n);
+			shown += n;
+			col += w;
+		} else if (*p == '\t') {
 			size_t n = w < room ? w : room; /* spaces can be cut anywhere */
 			put(out, pos, max, spaces, n);
-			col += n; /* if the tab was cut, col == max_cols and the loop ends below */
+			shown += n; /* if the tab was cut, shown == max_cols and the next cell ends the loop */
+			col += w;
 		} else if (w > room) {
 			break; /* never show half of a mark, and room is 0 at the right edge */
 		} else if (is_control((unsigned char)*p)) {
 			char mark[2] = { '^', *p == 0x7f ? '?' : (char)(*p ^ 0x40) };
 			put(out, pos, max, mark, 2);
+			shown += w;
 			col += w;
 		} else if (utf8_valid_len(p) == 0 || utf8_is_c1(p)) {
 			put(out, pos, max, "?", 1); /* cannot act on the terminal */
+			shown += w;
 			col += w;
 		} else {
 			put(out, pos, max, p, utf8_cell_len(p));
+			shown += w;
 			col += w;
 		}
 	}
-	return col;
+	return shown;
 }
 
 size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
@@ -189,7 +219,7 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
 	if (avail > max_rows) avail = max_rows;
 	for (size_t i = 0; i < avail; i++) {
 		if (i > 0) put(out, &pos, max, "\r\n", 2);
-		put_line(e->lines[e->rowoff + i], max_cols, out, &pos, max);
+		put_line(e->lines[e->rowoff + i], e->coloff, max_cols, out, &pos, max);
 	}
 	out[pos] = '\0';
 	return pos;
@@ -298,11 +328,11 @@ static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t s
 	for (; drawn < avail; drawn++) {
 		const char *line = e->lines[e->rowoff + drawn];
 		size_t need = pos + (drawn > 0 ? 2 : 0);
-		size_t width = put_line(line, max_cols, NULL, &need, (size_t)-1); /* measure first: a row is whole or not at all */
+		size_t width = put_line(line, e->coloff, max_cols, NULL, &need, (size_t)-1); /* measure first: a row is whole or not at all */
 		if (width < max_cols) need += 3;
 		if (need > rows_end) break;
 		if (drawn > 0) put(out, &pos, rows_end, "\r\n", 2);
-		put_line(line, max_cols, out, &pos, rows_end);
+		put_line(line, e->coloff, max_cols, out, &pos, rows_end);
 		if (width < max_cols) put(out, &pos, rows_end, "\x1b[K", 3); /* not after the last column: the cursor is still on it */
 	}
 	if (drawn < max_rows) pos += (size_t)snprintf(out + pos, out_size - pos, "\x1b[%zu;1H\x1b[J", drawn + 1);
@@ -318,6 +348,7 @@ static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t s
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
 	if (status_row && row >= max_rows) row = max_rows - 1; /* never on the status line */
 	size_t col = e->cy < e->count ? display_col(e->lines[e->cy], e->cx) : 0;
+	col = col > e->coloff ? col - e->coloff : 0;
 	if (status_row && command) { /* the cursor is at the end of the typed text on the bottom row */
 		row = status_row - 1;
 		col = 0;
@@ -607,7 +638,7 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
 		size_t used = 0;
 		if (left) {
 			sprintf(left, "%s%s%s %s", name, e->crlf ? " [dos]" : "", e->modified ? " [+]" : "", mode);
-			used = put_line(left, cols - right_w - 1, out, &pos, max);
+			used = put_line(left, 0, cols - right_w - 1, out, &pos, max);
 			free(left);
 		}
 		for (; used < cols - right_w; used++) put(out, &pos, max, " ", 1);
@@ -632,7 +663,7 @@ static size_t plain_row(const char *prefix, const char *text, size_t cols, char 
 	size_t used = 0;
 	if (line) {
 		sprintf(line, "%s%s", prefix, text);
-		used = put_line(line, cols, out, &pos, max);
+		used = put_line(line, 0, cols, out, &pos, max);
 		free(line);
 	}
 	size_t width = used;
