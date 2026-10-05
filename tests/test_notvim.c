@@ -281,6 +281,43 @@ static void test_notvim_ignored_escape_sequence_does_not_redraw(void) {
 	TEST_ASSERT_EQUAL_UINT(0, n);
 }
 
+/** @brief Moving the cursor past the last visible row scrolls the screen, and back up scrolls it back. */
+static void test_notvim_scrolls_when_the_cursor_leaves_the_screen(void) {
+	const char *path = tmpdir_write("scroll.txt", "a\nb\nc\nd\ne\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], d1[256], d2[256], d3[256], u1[256], u3[256];
+	pid_t pid = spawn_notvim(path, 3, &master); /* a 3-row terminal */
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "j", d1, sizeof(d1));
+	send_and_read(master, "j", d2, sizeof(d2));
+	send_and_read(master, "j", d3, sizeof(d3));
+	send_and_read(master, "k", u1, sizeof(u1));
+	send_and_read(master, "kkk", u3, sizeof(u3)); /* up to the first line again */
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[256];
+	screen(expected, sizeof(expected), "a\r\nb\r\nc", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+	screen(expected, sizeof(expected), "a\r\nb\r\nc", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, d1);
+	screen(expected, sizeof(expected), "a\r\nb\r\nc", 3, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, d2);
+	screen(expected, sizeof(expected), "b\r\nc\r\nd", 3, 1); /* scrolled by one line */
+	TEST_ASSERT_EQUAL_STRING(expected, d3);
+	screen(expected, sizeof(expected), "b\r\nc\r\nd", 2, 1); /* still the same window */
+	TEST_ASSERT_EQUAL_STRING(expected, u1);
+	/* kkk is three redraws: line 2 in the same window, then line 1 scrolls back, then it stays */
+	char same_window[128], top[128], three[384];
+	screen(same_window, sizeof(same_window), "b\r\nc\r\nd", 1, 1);
+	screen(top, sizeof(top), "a\r\nb\r\nc", 1, 1);
+	snprintf(three, sizeof(three), "%s%s%s", same_window, top, top);
+	TEST_ASSERT_EQUAL_STRING(three, u3);
+}
+
 /** @brief An ordinary key does nothing yet and does not redraw. */
 static void test_notvim_ordinary_key_does_not_redraw(void) {
 	const char *path = tmpdir_write("plain.txt", "abc\n");
@@ -323,6 +360,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_hjkl_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
+	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);

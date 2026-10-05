@@ -83,6 +83,7 @@ int main(int argc, char **argv) {
 		editor_move_t dir;
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
+			editor_scroll(&e, (size_t)rows);
 			redraw(&e, rows, out, size);
 		}
 	}
