@@ -2,11 +2,10 @@
 
 ## In progress
 
-- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
+- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
 
 ## To do
 
-- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
 - H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
 - H3.2: As user, I want to type characters in insert mode and see them in the buffer
 - H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
@@ -48,4 +47,5 @@
 > Decisions (H2.1): `editor_render` stays pure text, so its tests do not change. A lone `ESC` is not told apart from the start of a sequence (that needs a timeout, planned with H3.1). The cursor may move below the visible rows until scrolling (H2.3). No remembered "wanted column" when moving through short lines (Vim's curswant), and `cx` is a byte index, so non-ASCII text puts the cursor mid-character; both are left for later.
 > Notice (H2.1): `editor_draw` redraws the whole screen after every move (no diffing) and reserves `EDITOR_DRAW_OVERHEAD` bytes so the cursor sequence is never cut. `main` guards `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte (an equivalent mutant today, kept on purpose). Ordinary keys and swallowed sequences do not redraw.
 > Known gaps (H2.1): a lone `ESC` is never reported; the cursor can sit below the visible rows (terminal clamps it) until H2.3; `cx` counts bytes, so UTF-8 text puts the cursor mid-character; no remembered column when passing through short lines.
-
+- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
+> Notice (H2.2): the mapping lives in `key_to_move` in `main.c` and is tested end to end on a pty; it behaves exactly like the arrows, so the clamping rules are not retested. When insert mode arrives (H3.1) the mapping must apply only in normal mode, because `h` has to type `h` there. Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
