@@ -5,7 +5,7 @@ A (not-)Vim reimplementation in C for UNIX/Linux for educational purposes. Built
 
 ## Status
 
-Early development: notvim opens a file, shows it, lets you move around, type text into it and save it with `:w`. `:q` is not built yet: leave with `Ctrl+Q`, which does not ask about unsaved changes.
+Early development: notvim opens a file, shows it, lets you move around, type text into it and save it with `:w`. Leave with `:q`, which refuses when there are unsaved changes (`:q!` forces).
 
 What works today:
 
@@ -27,9 +27,11 @@ Keys:
 | `Backspace` | In insert mode: delete the character before the cursor; at the start of a line, join it to the previous one |
 | `Delete` | In insert mode: delete the character under the cursor; at the end of a line, join the next one |
 | `Esc` | Leave insert mode, one character left unless at column 0 |
-| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. `:w`, `:w!` and `:w name` save (see below); any other command shows `E492` |
+| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. `:w`, `:w!` and `:w name` save (see below); `:q`, `:wq`, `:x` quit (see below); any other command shows `E492` |
 | `:w` `:w!` `:w name` | Save to the file, or to `name` (which becomes the file if there is none): `"name" [New] 12L, 345B written`, or `E32: No file name`. The write is atomic (temporary file, `fsync`, `rename`) and keeps the permission bits; a missing final newline is added, as in Vim |
-| `Ctrl+Q` | Quit |
+| `:q` `:q!` `:wq` `:x` | Quit; `:q` is refused with `E37: No write since last change (add ! to override)` when the buffer is modified, `:q!` quits without saving, `:wq` writes then quits, `:x` writes only if modified then quits; a failed write does not quit |
+| `ZZ` `ZQ` | Normal mode: like `:x` and `:q!` |
+| `Ctrl+Q` | Like `:q`: quits, but is refused when there are unsaved changes |
 
 The last row is the status line, or the command line, or a message such as an error (until the next key): `name [dos] [+] NORMAL` on the left, `line,col` (display column) on the right. On a narrow terminal the position stays and the rest is cut from the right (mode first).
 
@@ -39,12 +41,12 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w` |
-| In progress | quitting with `:q` and `:q!` |
+| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w`; quitting with `:q`, `:q!`, `:wq`, `:x`, `ZZ`, `ZQ` |
+| In progress | horizontal scrolling of long lines |
 | Navigation | Scrolling long lines horizontally; double-width characters |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
-| Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, `:wq`, command-line history and editing |
+| Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, command-line history and editing |
 | Mouse and clipboard | Wheel scrolling that keeps native selection, yanking to the system clipboard, bracketed paste |
 
 ## Known limitations
