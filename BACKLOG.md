@@ -11,16 +11,56 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 | H3 | Insert mode |
 | H4 | Saving and quitting |
 | H5 | Interface |
+| H6 | Robustness with real files and terminals |
 
 ## In progress
 
-- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
-  - Open question: a lone `Esc` cannot be told apart from the start of an arrow-key sequence without a timeout (H2.1).
-    - Preferred: `poll()` with a short timeout in `main`; it leaves the raw-mode flags and their tests alone.
-    - Alternative: `VMIN`/`VTIME`.
-  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
+- **H6.1** As user, I want a lone `Esc` to be recognised after a short timeout, so that it never swallows the next key I press
+  - Reproduced: after `Esc`, even a second later, the next `j` does nothing (the decoder is still waiting for an escape sequence, H2.1). A key is lost today.
+  - Proposed design: `main` waits on stdin with `poll()`.
+    - If no byte follows an `ESC` within a short time (about 50 ms), the decoder reports `KEY_ESC`.
+    - This leaves the raw-mode flags and their tests alone. The alternative is `VMIN`/`VTIME`.
+  - Needed by H3.1.
 
 ## To do
+
+### H6 Robustness with real files and terminals
+
+Each story below was reproduced against the real binary on a pty.
+They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
+
+- **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
+  - Reproduced: a line `a\0b` is drawn as `a`. With `:w` (H4.1) the rest of the line would be lost.
+  - Refusing is the cheap, safe choice; keeping NUL inside lines would mean storing a length per line.
+- **H6.3** As user, I want control characters in a file shown as visible marks (such as `^[`), so that a file can never send commands to my terminal
+  - Reproduced: a file containing `ESC [ 2 J` clears the screen when it is displayed.
+  - The marks are wider than the byte they replace, so the cursor and the clipping must count columns (shared with H6.4 and H6.8).
+- **H6.4** As user, I want tabs shown as spaces up to the next tab stop (8 columns), so that lines with tabs do not wrap and scroll the screen
+  - Reproduced: 24 lines of 20 tabs are 21 bytes each but 161 columns, and need 72 rows on a 24-row terminal.
+  - Introduces the difference between a byte index and a display column, for the cursor and for clipping.
+- **H6.5** As user, I want notvim to refuse to start when stdin or stdout is not a terminal, so that it never writes escape sequences into a pipe or a file
+  - Reproduced: `./notvim file | cat` writes the alternate-screen and cursor sequences into the pipe.
+- **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
+  - Reproduced: after `SIGTERM` the switch back from the alternate screen is never written.
+  - The handler only sets a flag and the main loop does the cleanup, as in H0.7. A crash or `SIGKILL` stays out of reach.
+- **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
+  - Reproduced: after the terminal shrinks to 8 rows, notvim still draws 24.
+  - The draw buffer must be reallocated for the new size.
+- **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
+  - Reproduced: clipping a 201-byte line to 80 bytes gives invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
+  - Out of scope: double-width (CJK) and combining characters.
+- **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
+  - Reproduced: `abc\r\ndef\r\n` is drawn as `abc\r\r\ndef\r`.
+  - The saving half belongs with H4.1.
+- **H6.10** As user, I want the cursor to remember the column I was on when I move through shorter lines, as in Vim
+- **H6.11** As user, I want the screen to update without clearing it first, and every write to complete, so that it does not flicker or lose output
+  - Today every key clears and redraws the whole screen. Proposed: overwrite each row and erase to the end of the line with `ESC [ K`, and loop on `write()` for partial writes.
+
+### H0 Development foundations
+
+- **H0.11** As dev, I want the remaining test gaps closed where practical
+  - The out-of-memory path of `editor_load_file` and `editor_append_line`, and the cleanup after a read error halfway through a file, are not tested.
+  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
 
 ### H2 Navigation
 
@@ -30,6 +70,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ### H3 Insert mode
 
+- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+  - Depends on H6.1: `Esc` must be recognised.
+  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
 - **H3.2** As user, I want to type characters in insert mode and see them in the buffer
 - **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
 
@@ -62,14 +105,14 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 - **H0.5** As dev, I want terminal code separated from editor code and covered by regression tests, so that raw mode and terminal size live in one module and refactors are safe
   - Regression tests came first: enter twice, leave twice, leave without enter, and a pty test that runs `./notvim` and quits with `Ctrl+Q`. `make test` now builds `notvim` first.
   - Then raw mode moved from `editor.c` to `terminal.c` as `terminal_*`, the unused `editor_version` was deleted, and the tests were split into `test_editor.c`, `test_terminal.c` and `test_notvim.c`.
-  - Known gap: the pty test cannot check that the terminal is restored, because Linux resets a pty's attributes when the last slave closes.
+  - Known gap: the pty test cannot check that the terminal is restored, because Linux resets a pty's attributes when the last slave closes (H0.11).
 - **H0.6** As dev, I want builds and tests to run under AddressSanitizer and UBSan, so that leaks and memory errors fail `make test` from the beginning
   - The Makefile has a `SAN` variable, on by default; `make clean && make SAN=` turns it off.
   - Valgrind was considered and dropped: it cannot run together with ASan and adds little here.
 - **H0.7** As dev, I want a per-test temporary directory helper, so that file-based tests never touch the repo and always clean up
   - `tests/tmpdir.c`: created in `setUp`, removed in `tearDown` (which runs after a failed assertion), also at `exit()` and after `SIGINT`/`SIGTERM`.
   - The signal handler only sets a flag and cleanup happens outside it, because `nftw` is not async-signal-safe.
-  - Known gap: a crash, an ASan abort or `SIGKILL` leaves the directory in `/tmp`.
+  - Known gap: a crash, an ASan abort or `SIGKILL` leaves the directory in `/tmp` (H0.11).
 - **H0.8** As dev, I want the editor text stored as a growable array of lines, so that files of any size load without truncation
   - Design: `editor_t` is `char **lines` + `count` + `cap`. `editor_append_line` copies the text and leaves the editor unchanged on failure. `editor_free` is safe to call twice.
   - Decision: fixed limits were rejected, because loading a long file and saving it with `:w` (H4.1) would silently destroy data.
@@ -95,10 +138,10 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - Loading errors: any other open or read error makes `editor_load_file` return -1 with `errno` set and an empty editor.
   - `notvim` then prints `notvim: <path>: <reason>` and exits 1 before entering raw mode, so the message shows on a normal terminal.
   - Rendering: lines are joined by `\r\n`, because raw mode clears `OPOST` and a bare `\n` would not return to column 0. An OS-dependent line-ending macro was discussed and not added (UNIX only).
-  - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). There is no `SIGWINCH` handling.
+  - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). There is no `SIGWINCH` handling (H6.7).
   - Known gaps:
-    - CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line).
-    - The out-of-memory path of `editor_load_file`, and the cleanup after a read error halfway through a file, are not tested.
+    - CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line): see H6.9 and H6.2.
+    - The out-of-memory path of `editor_load_file`, and the cleanup after a read error halfway through a file, are not tested: see H0.11.
   - Lines wider than the terminal were not clipped here; solved in H2.4.
 
 ### H2 Navigation
@@ -117,9 +160,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - `main` checks `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte. This is an equivalent mutant today, kept on purpose.
   - Ordinary keys and swallowed sequences do not redraw.
   - Known gaps:
-    - A lone `ESC` is never reported (needs a timeout, planned with H3.1).
-    - `cx` counts bytes, so UTF-8 text puts the cursor mid-character.
-    - No remembered "wanted column" when passing through short lines (Vim's curswant).
+    - A lone `ESC` is never reported (needs a timeout): see H6.1.
+    - `cx` counts bytes, so UTF-8 text puts the cursor mid-character: see H6.8.
+    - No remembered "wanted column" when passing through short lines (Vim's curswant): see H6.10.
 - **H2.2** As user, I want to move the cursor with `h j k l`, as in Vim
   - The mapping is `key_to_move` in `main.c`, tested end to end on a pty. It behaves exactly like the arrows, so the clamping rules are not retested.
   - Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
@@ -130,7 +173,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
     - `editor_render` starts at `rowoff`, and `editor_draw` puts the cursor on row `cy - rowoff + 1`.
     - `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0.
   - Decisions: vertical only, one line at a time (no half-page jumps or `scrolloff` margin). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state.
-  - Known gaps: no rows are reserved for a status line yet (H5.1). The whole screen is still redrawn after every key.
+  - Known gaps: no rows are reserved for a status line yet (H5.1). The whole screen is still redrawn after every key (H6.11).
 - **H2.4** As user, I want the editor to draw on the alternate screen and clip lines to the terminal width, so that my shell screen is left untouched and the first lines never scroll out of view
   - Found by running `./notvim BACKLOG.md` in a real terminal emulator, which the pty tests could not show.
   - Clipping: lines wider than the terminal wrapped onto extra rows, so the screen overflowed and the terminal scrolled the title away.
@@ -141,5 +184,5 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
     - The shell screen and scrollback are untouched, as in Vim.
   - `terminal_enter_alt_screen`/`terminal_leave_alt_screen` are idempotent like raw mode. A load error is printed before either starts, so it stays on the normal screen.
   - Known gaps:
-    - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal (H2.5, or a tab story).
+    - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal: see H6.4 and H6.8.
     - The tests check the exact byte stream on a pty; what a real emulator shows was checked by hand.
