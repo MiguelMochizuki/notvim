@@ -2,11 +2,12 @@
 
 ## In progress
 
-(nothing in progress)
+- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
+> Design (H2.1): three small steps, each with its own commits. (1) A pure key decoder (`keys.c`): fed one byte at a time, it turns `ESC [ A/B/C/D` into `KEY_UP/DOWN/RIGHT/LEFT`, ignores any other escape sequence (for example `ESC [ 3 ~`) without breaking the next key, and passes ordinary bytes through, `Ctrl+Q` included. (2) A cursor in `editor_t` (`cy`, `cx`, byte indexes) with `editor_move_cursor`: no wrapping, up/down clamp to the lines and the column to the line length, right stops on the last character (Vim normal mode), an empty editor keeps the cursor at 0,0. (3) `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence, and the main loop redraws after each key.
+> Decisions (H2.1): `editor_render` stays pure text, so its tests do not change. A lone `ESC` is not told apart from the start of a sequence (that needs a timeout, planned with H3.1). The cursor may move below the visible rows until scrolling (H2.3). No remembered "wanted column" when moving through short lines (Vim's curswant), and `cx` is a byte index, so non-ASCII text puts the cursor mid-character; both are left for later.
 
 ## To do
 
-- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
 - H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 - H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
 - H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
