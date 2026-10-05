@@ -5,15 +5,33 @@ A (not-)Vim reimplementation in C for UNIX/Linux for educational purposes. Built
 
 ## Status
 
-Early development. Currently supports:
+Early development: notvim is a **read-only viewer** for now. It opens a file, shows it, and lets you move around.
 
-- Raw mode input (no echo, no line buffering)
-- Exit with `Ctrl+Q`
-- Opening a file given on the command line and showing its lines, up to the terminal height (read-only)
-- Moving the cursor with the arrow keys or `h j k l`, scrolling when it leaves the screen
-- Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit; lines wider than the terminal are clipped
+What works today:
 
-Not yet implemented: horizontal scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
+- Opening a file given on the command line and showing its lines, up to the terminal height
+- Moving the cursor and scrolling vertically when it leaves the screen
+- Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit
+- Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen
+
+Keys:
+
+| Key | Action |
+|-----|--------|
+| `←` `↓` `↑` `→` or `h` `j` `k` `l` | Move the cursor (it never wraps or leaves the text) |
+| `Ctrl+Q` | Quit |
+
+## Roadmap
+
+The full list of stories, with the design decisions behind them, is in [BACKLOG.md](BACKLOG.md). In short:
+
+| Next | Stories |
+|------|---------|
+| In progress | Insert mode: `i` to enter, `Esc` to leave |
+| Navigation | Scrolling long lines horizontally |
+| Editing | Typing characters, `Backspace` and `Enter` |
+| Files | Saving with `:w`, quitting with `:q` and `:q!` |
+| Interface | A status line with file name, mode and cursor position |
 
 ## Build
 
@@ -23,10 +41,11 @@ Not yet implemented: horizontal scrolling, insertion mode, saving, command mode.
     make clean  # remove build artifacts
 ```
 
-Requires a C11 compiler (gcc or clang), make, and libutil (for pty tests).
-Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
-`make test`; `make clean && make SAN=` builds without them.
+Requires a C11 compiler (gcc or clang), make, libutil (for the pty tests) and a terminal that understands
+the xterm sequences for the alternate screen.
 
+Builds use AddressSanitizer and UBSan, so memory errors and leaks fail `make test`.
+`make clean && make SAN=` builds without them.
 
 ## Usage
 
@@ -34,11 +53,10 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
     ./notvim [file]
 ```
 
-With a file, its first lines (as many as fit the terminal) are shown; a missing
-file starts an empty buffer, and a file that cannot be read prints an error and
-exits with status 1. The arrow keys and `h j k l` move the cursor (it never wraps or leaves
-the text), and `Ctrl+Q` quits.
-More will come as histories land.
+- With a file, its lines are shown, as many as fit the terminal.
+- A file that does not exist starts an empty buffer; it is not created.
+- A file that cannot be read prints `notvim: <path>: <reason>` and exits with status 1.
+- Without an argument, notvim starts with an empty buffer.
 
 ## Layout
 
@@ -51,8 +69,7 @@ More will come as histories land.
   the built `./notvim` on a pty, and `tmpdir.c`, a per-test temporary directory.
   `tests/unity/` is vendored.
 
-Design decisions and the history of the refactors are recorded in
-[BACKLOG.md](BACKLOG.md).
+Design decisions and the history of the refactors are recorded in [BACKLOG.md](BACKLOG.md).
 
 ## Documentation convention
 
