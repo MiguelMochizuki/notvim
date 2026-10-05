@@ -7,6 +7,7 @@
 #include "test_keys.h"
 #include "test_terminal.h"
 #include "test_notvim.h"
+#include "test_stopsig.h"
 #include "test_tmpdir.h"
 #include "tmpdir.h"
 
@@ -23,6 +24,7 @@ int main(void) {
 	UNITY_BEGIN();
 	test_editor_suite();
 	test_keys_suite();
+	test_stopsig_suite();
 	test_terminal_suite();
 	test_notvim_suite();
 	test_tmpdir_suite();
