@@ -6,6 +6,7 @@
 # 	- Builds use AddressSanitizer + UBSan (memory errors and leaks fail the run).
 # 	  Disable with `make clean && make SAN=`; run `make clean` after changing SAN.
 # 	- Objects are rebuilt when an included header changes (-MMD).
+# 	- make check-eol: fails if a tracked text file contains a carriage return (the repo is LF only; make test runs it).
 CC 			= gcc
 SAN 		?= -fsanitize=address,undefined -fno-omit-frame-pointer
 CFLAGS 		= -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -Itests/unity -MMD -MP $(SAN)
@@ -30,7 +31,14 @@ notvim: $(OBJS)
 %.o: %.c
 	$(CC) $(CFLAGS) -c $< -o $@
 
-test: notvim test_runner
+# Every tracked text file must be LF only (EOL_FILES can be overridden, for example to test the check)
+EOL_FILES ?= $(shell git ls-files)
+
+check-eol:
+	@bad=$$(grep -lI "$$(printf '\r')" $(EOL_FILES) 2>/dev/null); \
+	if [ -n "$$bad" ]; then echo "carriage return (CRLF) found in:"; echo "$$bad"; exit 1; fi
+
+test: check-eol notvim test_runner
 	./test_runner
 
 test_runner: $(OBJS_LIB) $(TEST_OBJS) $(UNITY_OBJS)
@@ -44,4 +52,4 @@ clean:
 # Rebuild objects when a header they include changes (.d files written by -MMD)
 -include $(OBJS:.o=.d) $(TEST_OBJS:.o=.d) $(UNITY_OBJS:.o=.d)
 
-.PHONY: all test clean
+.PHONY: all test clean check-eol
