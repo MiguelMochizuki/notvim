@@ -202,7 +202,7 @@ Do these once insert mode and yank exist.
   - Design, step 3: `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence.
     - The main loop redraws after each key. `editor_render` stays pure text.
   - `editor_draw` redraws the whole screen after every move (no diffing) and reserves `EDITOR_DRAW_OVERHEAD` bytes so the cursor sequence is never cut.
-  - `main` checks `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte. This is an equivalent mutant today, kept on purpose.
+  - `main` checks `key < 256` before the quit test (the old `editor_should_exit`, replaced by the `editor_t.quit` flag), so a key code above 255 can never alias a byte. This is an equivalent mutant today, kept on purpose.
   - Ordinary keys and swallowed sequences do not redraw.
   - Known gaps:
     - A lone `ESC` is never reported (needs a timeout): see H6.1.
