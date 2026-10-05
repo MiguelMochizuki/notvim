@@ -27,7 +27,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | Restoring the terminal when notvim is stopped by a signal |
+| In progress | Following terminal resizes |
 | Robustness | The limitations below, in order of harm (epic H6) |
 | Editing | Insert mode, typing characters, `Backspace` and `Enter` |
 | Navigation | Scrolling long lines horizontally |
@@ -39,7 +39,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 These are being fixed before new features (see epic H6 in [BACKLOG.md](BACKLOG.md)). Until then:
 
 - Files with accents or other non-ASCII text, or CRLF line endings, are not displayed correctly (a CRLF file shows `^M` at the end of each line).
-- The screen does not follow terminal resizes, and `kill` leaves the terminal on the alternate screen.
+- The screen does not follow terminal resizes.
 
 ## Build
 
@@ -71,7 +71,8 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail `make tes
 - `src/main.c`: entry point (argument, raw mode, input loop, key mapping, redraw after each move).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
   the cursor and vertical scrolling, loading a file, rendering and drawing a window of rows and columns.
-- `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows).
+- `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows, a lone Esc after a timeout).
+- `src/stopsig.c`, `include/stopsig.h`: catching SIGINT, SIGTERM and SIGHUP through a pipe, so the terminal is restored.
 - `src/terminal.c`, `include/terminal.h`: raw mode, alternate screen and terminal size.
 - `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
   the built `./notvim` on a pty, and `tmpdir.c`, a per-test temporary directory.
