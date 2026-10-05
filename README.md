@@ -27,7 +27,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | Showing control characters safely |
+| In progress | Showing tabs as spaces |
 | Robustness | The limitations below, in order of harm (epic H6) |
 | Editing | Insert mode, typing characters, `Backspace` and `Enter` |
 | Navigation | Scrolling long lines horizontally |
@@ -38,7 +38,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 These are being fixed before new features (see epic H6 in [BACKLOG.md](BACKLOG.md)). Until then:
 
-- Files with tabs, accents or other non-ASCII text, control characters or CRLF line endings are not displayed correctly.
+- Files with tabs, accents or other non-ASCII text, or CRLF line endings are not displayed correctly (a CRLF file shows `^M` at the end of each line).
 - The screen does not follow terminal resizes, and `kill` leaves the terminal on the alternate screen.
 - Output must go to a terminal: redirecting it writes escape sequences into the file or pipe.
 
