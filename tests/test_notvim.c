@@ -4,6 +4,7 @@
  */
 #define _DEFAULT_SOURCE /* usleep, kill under -std=c11 */
 #include <errno.h>
+#include <stdio.h>
 #include <poll.h>
 #include <pty.h>
 #include <signal.h>
@@ -76,6 +77,20 @@ static int quit_and_wait(int master, pid_t pid) {
 	return wait_exit(pid);
 }
 
+/** @brief Write the screen notvim should draw for @p text with the cursor at row @p row, column @p col (1-based). */
+static void screen(char *buf, size_t size, const char *text, int row, int col) {
+	snprintf(buf, size, "\x1b[H\x1b[2J%s\x1b[%d;%dH", text, row, col);
+}
+
+/** @brief Send @p keys to the child, then read what it draws in answer; return the length. */
+static size_t send_and_read(int master, const char *keys, char *out, size_t size) {
+	if (write(master, keys, strlen(keys)) < 0) {
+		out[0] = '\0';
+		return 0;
+	}
+	return read_output(master, out, size);
+}
+
 /** @brief With no argument, notvim enters raw mode and quits on Ctrl+Q with status 0. */
 static void test_notvim_binary_enters_raw_and_quits_on_ctrl_q(void) {
 	int master;
@@ -100,7 +115,9 @@ static void test_notvim_shows_file_lines(void) {
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	TEST_ASSERT_EQUAL_STRING("line1\r\nline2\r\nline3", out);
+	char expected[256];
+	screen(expected, sizeof(expected), "line1\r\nline2\r\nline3", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
 /** @brief A file taller than the terminal is cut to the terminal height. */
@@ -116,13 +133,15 @@ static void test_notvim_shows_only_the_rows_that_fit(void) {
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	TEST_ASSERT_EQUAL_STRING("a\r\nb", out);
+	char expected[256];
+	screen(expected, sizeof(expected), "a\r\nb", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
 /** @brief A screenful of long lines (more than 1 KB) is shown whole. */
 static void test_notvim_shows_a_full_screen_of_long_lines(void) {
 	char content[2500] = "";
-	char expected[2500] = "";
+	char text[2500] = "";
 	char line[80];
 	for (int i = 0; i < 30; i++) {
 		memset(line, 'a' + i % 26, 70);
@@ -130,14 +149,14 @@ static void test_notvim_shows_a_full_screen_of_long_lines(void) {
 		strcat(content, line);
 		strcat(content, "\n");
 		if (i < 24) {
-			if (i > 0) strcat(expected, "\r\n");
-			strcat(expected, line);
+			if (i > 0) strcat(text, "\r\n");
+			strcat(text, line);
 		}
 	}
 	const char *path = tmpdir_write("big.txt", content);
 	TEST_ASSERT_NOT_NULL(path);
 	int master;
-	char out[4096];
+	char out[4096], expected[4096];
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, out, sizeof(out));
@@ -145,10 +164,11 @@ static void test_notvim_shows_a_full_screen_of_long_lines(void) {
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
+	screen(expected, sizeof(expected), text, 1, 1);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
-/** @brief A missing file starts an empty editor, writes nothing and is not created. */
+/** @brief A missing file starts an empty editor, draws an empty screen and is not created. */
 static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	const char *path = tmpdir_path("new.txt");
 	TEST_ASSERT_NOT_NULL(path);
@@ -156,15 +176,81 @@ static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	char out[256];
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
-	size_t n = read_output(master, out, sizeof(out));
+	read_output(master, out, sizeof(out));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[256];
+	screen(expected, sizeof(expected), "", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
+	TEST_ASSERT_EQUAL_INT(ENOENT, errno);
+}
+
+/** @brief Arrow keys move the cursor and each one redraws the screen. */
+static void test_notvim_arrow_keys_move_the_cursor_and_redraw(void) {
+	const char *path = tmpdir_write("arrows.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], down[256], right[256], up[256], left[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "\x1b[B", down, sizeof(down));
+	send_and_read(master, "\x1b[C", right, sizeof(right));
+	send_and_read(master, "\x1b[A", up, sizeof(up));
+	send_and_read(master, "\x1b[D", left, sizeof(left));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[256];
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+	screen(expected, sizeof(expected), "abc\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, down);
+	screen(expected, sizeof(expected), "abc\r\ndef", 2, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, right);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, up);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, left);
+}
+
+/** @brief An escape sequence that is not an arrow (Delete) is ignored and does not redraw. */
+static void test_notvim_ignored_escape_sequence_does_not_redraw(void) {
+	const char *path = tmpdir_write("ignored.txt", "abc\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], after[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	size_t n = send_and_read(master, "\x1b[3~", after, sizeof(after));
 	int status = quit_and_wait(master, pid);
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
 	TEST_ASSERT_EQUAL_UINT(0, n);
-	struct stat st;
-	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
-	TEST_ASSERT_EQUAL_INT(ENOENT, errno);
+}
+
+/** @brief An ordinary key does nothing yet and does not redraw. */
+static void test_notvim_ordinary_key_does_not_redraw(void) {
+	const char *path = tmpdir_write("plain.txt", "abc\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], after[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	size_t n = send_and_read(master, "a", after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(0, n);
 }
 
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
@@ -188,6 +274,9 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_shows_file_lines);
 	RUN_TEST(test_notvim_shows_only_the_rows_that_fit);
 	RUN_TEST(test_notvim_shows_a_full_screen_of_long_lines);
+	RUN_TEST(test_notvim_arrow_keys_move_the_cursor_and_redraw);
+	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
+	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
 }
