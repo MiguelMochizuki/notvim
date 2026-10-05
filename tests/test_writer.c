@@ -377,6 +377,102 @@ static void test_command_w_other_name_keeps_the_path(void) {
 	TEST_ASSERT_EQUAL_INT(1, e.modified);
 }
 
+/** @brief ":w name" on an existing file that is not the buffer's own shows E13 and leaves the file, modified and path alone. */
+static void test_command_w_refuses_an_existing_other_file(void) {
+	char path[256], other[256], cmd[300];
+	snprintf(path, sizeof(path), "%s", tmpdir_write("a.txt", "a\n"));
+	snprintf(other, sizeof(other), "%s", tmpdir_write("b.txt", "old\n"));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	type("ix\x1b");
+	snprintf(cmd, sizeof(cmd), ":w %s\r", other);
+	type(cmd);
+	assert_msg("E13: File exists (add ! to override)");
+	assert_file(other, "old\n", 4);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+	TEST_ASSERT_EQUAL_STRING(path, e.path);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+}
+
+/** @brief A buffer with no name refuses an existing file too, and adopts no path. */
+static void test_command_w_refuses_an_existing_file_without_a_path(void) {
+	char other[256], cmd[300];
+	snprintf(other, sizeof(other), "%s", tmpdir_write("b.txt", "old\n"));
+	editor_init(&e);
+	type("ix\x1b");
+	snprintf(cmd, sizeof(cmd), ":w %s\r", other);
+	type(cmd);
+	assert_msg("E13: File exists (add ! to override)");
+	assert_file(other, "old\n", 4);
+	TEST_ASSERT_NULL(e.path);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+}
+
+/** @brief ":w! name" overwrites an existing other file (and, as in Vim, a read-only one), keeping modified and the path. */
+static void test_command_w_bang_overwrites_an_existing_other_file(void) {
+	char path[256], other[256], cmd[300], want[400];
+	snprintf(path, sizeof(path), "%s", tmpdir_write("a.txt", "a\n"));
+	snprintf(other, sizeof(other), "%s", tmpdir_write("b.txt", "old\n"));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	type("ix\x1b");
+	snprintf(cmd, sizeof(cmd), ":w! %s\r", other);
+	type(cmd);
+	assert_file(other, "xa\n", 3);
+	snprintf(want, sizeof(want), "\"%s\" 1L, 3B written", other);
+	assert_msg(want);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+	chmod(other, 0444);
+	if (geteuid() != 0) { /* the bit check is meaningless as root, the overwrite itself is not */
+		type("iy\x1b");
+		type(cmd);
+		assert_file(other, "yxa\n", 4);
+	}
+}
+
+/** @brief Writing to the buffer's own file is allowed in any spelling: no name, the same path, a symlink to it, "./name". */
+static void test_command_w_own_file_in_any_spelling_is_allowed(void) {
+	char path[256], link[256], dotted[300], cmd[400];
+	snprintf(path, sizeof(path), "%s", tmpdir_write("a.txt", "a\n"));
+	snprintf(link, sizeof(link), "%s", tmpdir_path("ln.txt"));
+	TEST_ASSERT_EQUAL_INT(0, symlink(path, link));
+	snprintf(dotted, sizeof(dotted), "%s/./a.txt", tmpdir_path("."));
+	const char *names[] = { "", path, link, dotted };
+	const char *want[] = { "xa\n", "xxa\n", "xxxa\n", "xxxxa\n" };
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	for (int i = 0; i < 4; i++) {
+		type("ix\x1b");
+		snprintf(cmd, sizeof(cmd), ":w %s\r", names[i]);
+		type(cmd);
+		assert_file(path, want[i], strlen(want[i]));
+		TEST_ASSERT_EQUAL_INT(0, e.modified);
+	}
+}
+
+/** @brief ":wq other" and ":x other" refuse an existing other file and do not quit; with '!' they write and quit. */
+static void test_command_wq_and_x_refuse_an_existing_other_file(void) {
+	char path[256], other[256], cmd[300];
+	snprintf(path, sizeof(path), "%s", tmpdir_write("a.txt", "a\n"));
+	snprintf(other, sizeof(other), "%s", tmpdir_write("b.txt", "old\n"));
+	const char *fmt[] = { ":wq %s\r", ":x %s\r" };
+	for (int i = 0; i < 2; i++) {
+		editor_free(&e);
+		editor_init(&e);
+		TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+		type("ix\x1b");
+		snprintf(cmd, sizeof(cmd), fmt[i], other);
+		type(cmd);
+		assert_msg("E13: File exists (add ! to override)");
+		TEST_ASSERT_EQUAL_INT(0, e.quit);
+		assert_file(other, "old\n", 4);
+	}
+	snprintf(cmd, sizeof(cmd), ":wq! %s\r", other);
+	type(cmd);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(other, "xa\n", 3);
+}
+
 /** @brief An empty editor is saved as an empty file with "0L, 0B written". */
 static void test_command_w_empty_editor(void) {
 	char path[256], cmd[300], want[400];
@@ -671,6 +767,11 @@ void test_writer_suite(void) {
 	RUN_TEST(test_command_w_creates_the_loaded_missing_file);
 	RUN_TEST(test_command_w_keeps_the_line_endings);
 	RUN_TEST(test_command_w_other_name_keeps_the_path);
+	RUN_TEST(test_command_w_refuses_an_existing_other_file);
+	RUN_TEST(test_command_w_refuses_an_existing_file_without_a_path);
+	RUN_TEST(test_command_w_bang_overwrites_an_existing_other_file);
+	RUN_TEST(test_command_w_own_file_in_any_spelling_is_allowed);
+	RUN_TEST(test_command_wq_and_x_refuse_an_existing_other_file);
 	RUN_TEST(test_command_w_empty_editor);
 	RUN_TEST(test_command_w_error_shows_strerror);
 	RUN_TEST(test_command_w_message_goes_with_the_next_key);

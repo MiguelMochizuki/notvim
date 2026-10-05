@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include "commands.h"
 #include "writer.h"
@@ -16,11 +17,26 @@ static void say(editor_t *e, const char *text) {
 	editor_set_message(e, text);
 }
 
-/** @brief The ":w" command: write to the path of @p e or to the name in @p arg, and report; return 0 if it was written, -1 if not. */
-static int cmd_write(editor_t *e, const char *arg) {
+/** @brief Non-zero if @p a and @p b name the same existing file (same device and inode, so links and spellings do not matter). */
+static int same_file(const char *a, const char *b) {
+	struct stat sa, sb;
+	return stat(a, &sa) == 0 && stat(b, &sb) == 0 && sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
+}
+
+/**
+ * @brief The ":w" command: write to the path of @p e or to the name in @p arg, and report; return 0 if it was written, -1 if not.
+ *
+ * As in Vim, without @p bang an existing file that is not the buffer's own is refused (E13).
+ */
+static int cmd_write(editor_t *e, const char *arg, int bang) {
 	const char *path = arg[0] ? arg : e->path;
 	if (!path) {
 		say(e, "E32: No file name");
+		return -1;
+	}
+	int own = e->path && same_file(path, e->path);
+	if (!bang && !own && access(path, F_OK) == 0) {
+		say(e, "E13: File exists (add ! to override)");
 		return -1;
 	}
 	int is_new = access(path, F_OK) != 0;
@@ -36,7 +52,7 @@ static int cmd_write(editor_t *e, const char *arg) {
 	if (!e->path) { /* adopt the name; the message is set after, as a load or free would drop it */
 		e->path = strdup(path);
 	}
-	if (e->path && strcmp(e->path, path) == 0) e->modified = 0;
+	if (e->path && (strcmp(e->path, path) == 0 || same_file(e->path, path))) e->modified = 0;
 	sprintf(msg, "\"%s\"%s%s %zuL, %zuB written", path, is_new ? " [New]" : "", e->crlf ? " [dos]" : "", lines, bytes);
 	say(e, msg);
 	free(msg);
@@ -53,12 +69,12 @@ void commands_run(editor_t *e, const char *text) {
 	cmd_t cmd;
 	cmd_parse(text, &cmd);
 	if (strcmp(cmd.name, "w") == 0) {
-		cmd_write(e, cmd.arg);
+		cmd_write(e, cmd.arg, cmd.bang);
 	} else if (strcmp(cmd.name, "q") == 0) {
 		cmd_quit(e, cmd.bang);
 	} else if (strcmp(cmd.name, "wq") == 0 || strcmp(cmd.name, "x") == 0) {
 		/* ":wq" always writes, ":x" only a modified buffer */
-		if ((cmd.name[0] == 'w' || e->modified) && cmd_write(e, cmd.arg) < 0) return;
+		if ((cmd.name[0] == 'w' || e->modified) && cmd_write(e, cmd.arg, cmd.bang) < 0) return;
 		e->quit = 1;
 	} else if (cmd.name[0] || cmd.bang || cmd.arg[0]) {
 		char msg[CMDLINE_MAX + 40];

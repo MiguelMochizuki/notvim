@@ -27,8 +27,8 @@ Keys:
 | `Backspace` | In insert mode: delete the character before the cursor; at the start of a line, join it to the previous one |
 | `Delete` | In insert mode: delete the character under the cursor; at the end of a line, join the next one |
 | `Esc` | Leave insert mode, one character left unless at column 0 |
-| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. `:w`, `:w!` and `:w name` save (see below); `:q`, `:wq`, `:x` quit (see below); any other command shows `E492` |
-| `:w` `:w!` `:w name` | Save to the file, or to `name` (which becomes the file if there is none): `"name" [New] 12L, 345B written`, or `E32: No file name`. The write is atomic (temporary file, `fsync`, `rename`) and keeps the permission bits; a missing final newline is added, as in Vim |
+| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. `:w`, `:w!` and `:w name` save (`!` overrides a refusal) (see below); `:q`, `:wq`, `:x` quit (see below); any other command shows `E492` |
+| `:w` `:w!` `:w name` | Save to the file, or to `name` (which becomes the file if there is none): `"name" [New] 12L, 345B written`, `E32: No file name`, or `E13: File exists (add ! to override)` for an existing file that is not the buffer's own (`:w! name` overwrites it). The write is atomic (temporary file, `fsync`, `rename`) and keeps the permission bits; a missing final newline is added, as in Vim |
 | `:q` `:q!` `:wq` `:x` | Quit; `:q` is refused with `E37: No write since last change (add ! to override)` when the buffer is modified, `:q!` quits without saving, `:wq` writes then quits, `:x` writes only if modified then quits; a failed write does not quit |
 | `ZZ` `ZQ` | Normal mode: like `:x` and `:q!` |
 | `Ctrl+Q` | Like `:q`: quits, but is refused when there are unsaved changes |
