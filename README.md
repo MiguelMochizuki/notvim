@@ -25,8 +25,6 @@ Requires a C11 compiler (gcc or clang), make, and libutil (for pty tests).
 Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
 `make test`; `make clean && make SAN=` builds without them.
 
-When a test fails, a leak report from the sanitizer can hide the test output;
-run `ASAN_OPTIONS=detect_leaks=0 ./test_runner` to read the results.
 
 ## Usage
 
