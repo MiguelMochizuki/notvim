@@ -48,6 +48,12 @@ static int screen_fit(screen_t *s) {
 	return 0;
 }
 
+/** @brief Scroll both ways so that the cursor is inside the text window of @p s. */
+static void screen_scroll(const screen_t *s, editor_t *e) {
+	editor_scroll(e, editor_text_rows((size_t)s->rows));
+	editor_scroll_cols(e, (size_t)s->cols);
+}
+
 /** @brief Draw the whole screen with the cursor; 0 if it all got written, -1 if the terminal can't be written to. */
 static int screen_draw(const screen_t *s, const editor_t *e) {
 	size_t n = editor_draw_screen(e, (size_t)s->rows, (size_t)s->cols, s->buf, s->size);
@@ -146,8 +152,7 @@ int main(int argc, char **argv) {
 		} else if (pfds[2].revents & POLLIN) {
 			winch_drain();
 			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
-			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
-			editor_scroll_cols(&e, (size_t)screen.cols);
+			screen_scroll(&screen, &e);
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;
@@ -161,8 +166,7 @@ int main(int argc, char **argv) {
 		if (key == KEY_NONE) continue;
 		if (editor_handle_key(&e, key)) {
 			if (e.quit) break; /* ":q", ":wq", ":x", "ZZ", "ZQ" or Ctrl+Q: leave through the normal exit, status 0 */
-			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
-			editor_scroll_cols(&e, (size_t)screen.cols);
+			screen_scroll(&screen, &e);
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;
 				break;
