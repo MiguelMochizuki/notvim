@@ -3,8 +3,11 @@
 # 	- make all: compiles src/*.c and generates notvim binary at root
 # 	- make test: compiels and runs test suite; returns 0 if success and != 0 if fails
 # 	- make clean: removes binary and object files
+# 	- Builds use AddressSanitizer + UBSan (memory errors and leaks fail the run).
+# 	  Disable with `make clean && make SAN=` (needed for Valgrind, which can't run with ASan).
 CC 			= gcc
-CFLAGS 		= -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -Itests/unity
+SAN 		?= -fsanitize=address,undefined -fno-omit-frame-pointer
+CFLAGS 		= -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -Itests/unity $(SAN)
 
 SRCS 		= $(wildcard src/*.c)
 OBJS 		= $(SRCS:.c=.o)
