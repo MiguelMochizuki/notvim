@@ -11,8 +11,11 @@
 
 /** @brief Unity hook run before each test; creates the temporary directory. */
 void setUp(void) { tmpdir_create(); }
-/** @brief Unity hook run after each test, even a failed one; removes the temporary directory. */
-void tearDown(void) { tmpdir_destroy(); }
+/** @brief Unity hook run after each test, even a failed one; frees the shared editor and removes the temporary directory. */
+void tearDown(void) {
+	test_editor_teardown();
+	tmpdir_destroy();
+}
 
 /** @brief Run all suites. @return Number of failed tests (0 on success). */
 int main(void) {
