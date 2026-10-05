@@ -19,16 +19,12 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
-  - Same mechanism as `rowoff`, for columns: `coloff`, `editor_scroll` with the width, the drawn cursor column relative to it.
-  - Until then the cursor stops on the last visible column of a clipped line.
+(nothing in progress)
 
 ## To do
 
-Order of work: H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
-
-### H2 Navigation
 
 ### H6 Robustness with real files and terminals
 
@@ -231,6 +227,12 @@ Do these once insert mode and yank exist.
   - Known gaps:
     - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal: see H6.4 and H6.8.
     - The tests check the exact byte stream on a pty; what a real emulator shows was checked by hand.
+
+- **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
+  - Design: `editor_t.coloff` (display columns) is the first visible column; `editor_scroll_cols(e, cols)` keeps the cursor inside it; `main` calls it after every key and resize.
+  - Design: `put_line` skips the cells left of `coloff`; a tab or mark cut by the left edge shows its remaining spaces (one space for a mark), so later cells keep their place.
+  - Decisions: scrolls the minimum, one column at a time (like `rowoff`); a mark under the cursor must show whole, a tab needs its first column; the status line keeps the absolute `line,col`.
+  - Known gaps: differs from Vim's default `sidescroll=0` (checked: Vim 9.1 recentres, leftcol 40 at column 80 of 80); no `sidescrolloff`; a cursor on a tab sits on its first column.
 
 ### H5 Interface
 
