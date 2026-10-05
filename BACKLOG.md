@@ -1,59 +1,145 @@
 # Backlog: notvim
 
+Stories are numbered `H<epic>.<n>`. A story is "As user" (what the editor does) or "As dev" (how the project is built).
+Under a story, **Design** is how it was built, **Decisions** are the choices behind it, and **Known gaps** is what is left out on purpose.
+
+| Epic | Theme |
+|------|-------|
+| H0 | Development foundations: build, tests, documentation, memory safety |
+| H1 | Terminal and display |
+| H2 | Navigation |
+| H3 | Insert mode |
+| H4 | Saving and quitting |
+| H5 | Interface |
+
 ## In progress
 
-- H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+  - Open question: a lone `Esc` cannot be told apart from the start of an arrow-key sequence without a timeout (H2.1).
+    - Preferred: `poll()` with a short timeout in `main`; it leaves the raw-mode flags and their tests alone.
+    - Alternative: `VMIN`/`VTIME`.
+  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
 
 ## To do
 
-- H2.5: As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
-> Notice (H2.5): needs the same mechanism as `rowoff`, for columns (`coloff`, `editor_scroll` with the width, the drawn cursor column relative to it). Until then the cursor stops on the last visible column of a clipped line.
-- H3.2: As user, I want to type characters in insert mode and see them in the buffer
-- H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
-- H4.1: As user, I want to save with `:w`, so I don't lose my work
-- H4.2: As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
-- H5.1: As user, I want a status line with file name, mode and cursor position
+### H2 Navigation
+
+- **H2.5** As user, I want long lines to scroll horizontally with the cursor, so I can read and reach the part of a line that is clipped
+  - Same mechanism as `rowoff`, for columns: `coloff`, `editor_scroll` with the width, the drawn cursor column relative to it.
+  - Until then the cursor stops on the last visible column of a clipped line.
+
+### H3 Insert mode
+
+- **H3.2** As user, I want to type characters in insert mode and see them in the buffer
+- **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
+
+### H4 Saving and quitting
+
+- **H4.1** As user, I want to save with `:w`, so I don't lose my work
+  - A missing file is created here, not on load (H1.4).
+  - An editor with 0 lines saves as an empty file, and one empty line as `"\n"` (H0.8).
+  - Loading never truncates, so saving a long file must write every line (H0.8).
+- **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
+
+### H5 Interface
+
+- **H5.1** As user, I want a status line with file name, mode and cursor position
+  - `main` scrolls with the full terminal height today; the status line needs `rows - 1` (H2.3).
 
 ## Done
 
-- H0.1: As dev, I want a `Makefile` with `all`, `test` and `clean` for compiling and testing with a single command
-- H0.2: As dev, I want Unity integrated and `make test` running, for practicing TDD from the beginning
-- H1.1: As user, I want the terminal to enter in raw mode when running `notvim` and to be restored when exiting, so that the editor handles my input without breaking shell
-> Notice (H1.1): `enter`/`leave` not unit-tested (touch real terminal). Verified manually: raw mode active, Ctrl+C doesn't kill, terminal restored on exit. Pty-based integration test tracked as H0.3.
-- H1.2: As user, I want to leave notvim with `Ctrl+Q`, so I can go back to shell
-- H0.3: As dev, I want pty-based integration tests for terminal enter/leave, so that I can catch regressions in raw mode
-> Solves Notice (H1.1)
-- H1.3: As user, I want to see buffer content at my screen, so I can know what I am editing
-- H0.4: As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
-> Acceptance: convention written in README with one example; public symbols documented once in their header, everything else (statics, `main`, test functions) with a one-line `@brief` where defined; `editor_set_raw_flags` (now `terminal_set_raw_flags`, see H0.5) documented as exposed for testing only. Out of scope: vendored `tests/unity/`, generating HTML / `make docs`.
-- H0.5: As dev, I want terminal code separated from editor code and covered by regression tests, so that raw mode and terminal size live in one module and refactors are safe
-> Notice (H0.5): regression tests added first (enter twice, leave twice, leave without enter, and a pty test that runs `./notvim` and quits with `Ctrl+Q`); `make test` now builds `notvim` first. Then `editor_enter_raw`/`editor_leave_raw`/`editor_set_raw_flags` moved to `terminal.c` as `terminal_*`, the unused `editor_version` was deleted, and tests were split into `test_editor.c`, `test_terminal.c` and `test_notvim.c`. The pty test cannot check "terminal restored": Linux resets a pty's attributes when the last slave closes.
-- H0.6: As dev, I want builds and tests to run under AddressSanitizer and UBSan, so that leaks and memory errors fail `make test` from the beginning
-> Notice (H0.6): `SAN` variable in the Makefile, on by default; `make clean && make SAN=` turns it off. Valgrind was considered and dropped: it cannot run together with ASan and adds little here.
-- H0.7: As dev, I want a per-test temporary directory helper, so that file-based tests never touch the repo and always clean up
-> Notice (H0.7): `tests/tmpdir.c`, created in `setUp` and removed in `tearDown` (which runs after a failed assertion), also at `exit()` and after `SIGINT`/`SIGTERM` (the handler only sets a flag; cleanup happens outside it, because `nftw` is not async-signal-safe). Not covered: crashes, ASan aborts and `SIGKILL` leave the directory in `/tmp`.
-- H0.8: As dev, I want the editor text stored as a growable array of lines, so that files of any size load without truncation
-> Notice (H0.8): fixed limits were rejected because loading a long file and saving it with `:w` (H4.1) would silently destroy data. `editor_t` is `char **lines` + `count` + `cap`; `editor_append_line` copies the text and leaves the editor unchanged on failure; `editor_free` is safe to call twice. No gap buffer or undo structure (YAGNI). An empty editor has 0 lines, not 1: an empty file round-trips as 0 bytes and `"\n"` as one empty line.
-- H1.4: As user, I want to run `notvim file.txt` and see all its lines, up to the terminal height, so I can read the file
-> Notice (H1.4): merges former H1.4 (first line) and H1.5 (all lines).
-> Decisions: a missing file gives an empty editor and is not created until `:w` (H4.1), as in Vim; any other open or read error makes `editor_load_file` return -1 with `errno` set and an empty editor, and `notvim` prints `notvim: <path>: <reason>` and exits 1 before entering raw mode, so the message shows on a normal terminal. A final newline does not add an empty line. CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line).
-> Decisions: lines are rendered joined by `\r\n` because raw mode clears `OPOST`, so a bare `\n` would not return to column 0; an OS-dependent line ending macro was discussed and not added (UNIX only). The terminal size is read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0); there is no `SIGWINCH` handling. The render buffer is sized `rows * (cols + 2) + 1`; lines longer than the terminal are not clipped and use up the room of the rows after them (`ponytail:` comment in `main.c`).
-> Known gaps: the out-of-memory path of `editor_load_file` and the cleanup after a read error halfway through a file are not tested.
-- H0.9: As dev, I want a failing editor test to not leak, so that sanitizer reports never bury the test output
-> Notice (H0.9): the tests in `test_editor.c` share one file-level editor that `tearDown` frees (via `test_editor_teardown`), because a failed Unity assertion jumps out of the test and skips any cleanup written at its end. Rule for new tests: allocate through the shared editor or on the stack, never with a bare `malloc` that needs a `free` at the end.
-- H0.10: As dev, I want objects rebuilt when an included header changes, so that a struct change cannot leave stale objects behind
-> Notice (H0.10): found while adding the cursor fields to `editor_t`: `main.o` was not rebuilt, was compiled against the old, smaller struct, and `notvim` crashed in `editor_init`. The Makefile now uses `-MMD -MP` and includes the `.d` files; `make clean` removes them.
-- H2.1: As user, I want to move the cursor with the arrow keys, so I can navigate the text
-> Design (H2.1): three small steps, each with its own commits (as implemented). (1) A pure key decoder (`keys.c`): fed one byte at a time, it turns `ESC [ A/B/C/D` into `KEY_UP/DOWN/RIGHT/LEFT`, ignores any other escape sequence (for example `ESC [ 3 ~`) without breaking the next key, and passes ordinary bytes through, `Ctrl+Q` included. (2) A cursor in `editor_t` (`cy`, `cx`, byte indexes) with `editor_move_cursor`: no wrapping, up/down clamp to the lines and the column to the line length, right stops on the last character (Vim normal mode), an empty editor keeps the cursor at 0,0. (3) `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence, and the main loop redraws after each key.
-> Decisions (H2.1): `editor_render` stays pure text, so its tests do not change. A lone `ESC` is not told apart from the start of a sequence (that needs a timeout, planned with H3.1). The cursor may move below the visible rows until scrolling (H2.3). No remembered "wanted column" when moving through short lines (Vim's curswant), and `cx` is a byte index, so non-ASCII text puts the cursor mid-character; both are left for later.
-> Notice (H2.1): `editor_draw` redraws the whole screen after every move (no diffing) and reserves `EDITOR_DRAW_OVERHEAD` bytes so the cursor sequence is never cut. `main` guards `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte (an equivalent mutant today, kept on purpose). Ordinary keys and swallowed sequences do not redraw.
-> Known gaps (H2.1): a lone `ESC` is never reported; the cursor can sit below the visible rows (terminal clamps it) until H2.3; `cx` counts bytes, so UTF-8 text puts the cursor mid-character; no remembered column when passing through short lines.
-- H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
-> Notice (H2.2): the mapping lives in `key_to_move` in `main.c` and is tested end to end on a pty; it behaves exactly like the arrows, so the clamping rules are not retested. When insert mode arrives (H3.1) the mapping must apply only in normal mode, because `h` has to type `h` there. Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
-- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
-> Design (H2.3, as implemented): `editor_t` gets `rowoff`, the index of the first visible line. `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`; `editor_render` starts at `rowoff`; `editor_draw` puts the cursor on row `cy - rowoff + 1`; `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0. Steps: (1) the editor functions with unit tests, (2) `main` wiring with a pty test on a short terminal.
-> Decisions (H2.3): vertical scrolling only, one line at a time (no half-page jumps or `scrolloff` margin); no horizontal scrolling, so long lines are still cut by the draw buffer (see H1.4). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state. Rows reserved for a status line (H5.1) are not subtracted yet.
-> Known gaps (H2.3): `main` scrolls with the full terminal height, so a status line (H5.1) will need `rows - 1`; the whole screen is still redrawn after every key; a window taller than the file leaves `rowoff` at 0.
-- H2.4: As user, I want the editor to draw on the alternate screen and clip lines to the terminal width, so that my shell screen is left untouched and the first lines never scroll out of view
-> Notice (H2.4): found by using `./notvim BACKLOG.md` on a real terminal emulator, which the pty tests could not show. (1) Lines wider than the terminal wrapped onto extra rows (the first 24 lines of `BACKLOG.md` needed 35 rows), the screen overflowed and the terminal scrolled the title away while the cursor row still said 1. `editor_render` and `editor_draw` now take `max_cols` and clip each line, and the drawn cursor column stops at the last column. This solves the long-line gap noted in H1.4. (2) `ESC [ 2 J` does not wipe a terminal emulator's screen, it pushes it into scrollback, leaving blank space (like `Ctrl+L`). `main` now enters the alternate screen (`ESC [ ? 1049 h`) after raw mode and leaves it (`l`) at exit before restoring the tty modes, so the shell screen and scrollback are untouched, as in Vim.
-> Decisions (H2.4): `terminal_enter_alt_screen`/`terminal_leave_alt_screen` are idempotent like raw mode, and a load error is printed before either starts, so it stays on the normal screen. Widths are counted in bytes: tabs and UTF-8 text can still make a line wider than the terminal, to be handled with H2.5 or a tab story. The tests check the exact byte stream on a pty; what a real emulator then shows was checked by hand.
+### H0 Development foundations
+
+- **H0.1** As dev, I want a `Makefile` with `all`, `test` and `clean` for compiling and testing with a single command
+- **H0.2** As dev, I want Unity integrated and `make test` running, for practicing TDD from the beginning
+- **H0.3** As dev, I want pty-based integration tests for terminal enter/leave, so that I can catch regressions in raw mode
+  - Solves the H1.1 gap: `enter`/`leave` could not be unit-tested because they touch the real terminal.
+- **H0.4** As dev, I want every function, struct, macro and file-static variable documented in Doxygen style (`/** @brief ... @param ... @return ... */`), so I can find out what any symbol means without reading its implementation
+  - Public symbols are documented once, in their header. Everything else (statics, `main`, test functions) gets a one-line `@brief` where it is defined.
+  - The convention is written in the README with one example.
+  - `terminal_set_raw_flags` (named `editor_set_raw_flags` then) is documented as exposed for testing only.
+  - Out of scope: the vendored `tests/unity/`, and generating HTML (`make docs`).
+- **H0.5** As dev, I want terminal code separated from editor code and covered by regression tests, so that raw mode and terminal size live in one module and refactors are safe
+  - Regression tests came first: enter twice, leave twice, leave without enter, and a pty test that runs `./notvim` and quits with `Ctrl+Q`. `make test` now builds `notvim` first.
+  - Then raw mode moved from `editor.c` to `terminal.c` as `terminal_*`, the unused `editor_version` was deleted, and the tests were split into `test_editor.c`, `test_terminal.c` and `test_notvim.c`.
+  - Known gap: the pty test cannot check that the terminal is restored, because Linux resets a pty's attributes when the last slave closes.
+- **H0.6** As dev, I want builds and tests to run under AddressSanitizer and UBSan, so that leaks and memory errors fail `make test` from the beginning
+  - The Makefile has a `SAN` variable, on by default; `make clean && make SAN=` turns it off.
+  - Valgrind was considered and dropped: it cannot run together with ASan and adds little here.
+- **H0.7** As dev, I want a per-test temporary directory helper, so that file-based tests never touch the repo and always clean up
+  - `tests/tmpdir.c`: created in `setUp`, removed in `tearDown` (which runs after a failed assertion), also at `exit()` and after `SIGINT`/`SIGTERM`.
+  - The signal handler only sets a flag and cleanup happens outside it, because `nftw` is not async-signal-safe.
+  - Known gap: a crash, an ASan abort or `SIGKILL` leaves the directory in `/tmp`.
+- **H0.8** As dev, I want the editor text stored as a growable array of lines, so that files of any size load without truncation
+  - Design: `editor_t` is `char **lines` + `count` + `cap`. `editor_append_line` copies the text and leaves the editor unchanged on failure. `editor_free` is safe to call twice.
+  - Decision: fixed limits were rejected, because loading a long file and saving it with `:w` (H4.1) would silently destroy data.
+  - Decision: an empty editor has 0 lines, not 1. An empty file round-trips as 0 bytes and `"\n"` as one empty line.
+  - No gap buffer or undo structure (YAGNI).
+- **H0.9** As dev, I want a failing editor test to not leak, so that sanitizer reports never bury the test output
+  - The tests in `test_editor.c` share one file-level editor that `tearDown` frees (`test_editor_teardown`).
+  - Why: a failed Unity assertion jumps out of the test and skips any cleanup written at its end.
+  - Rule for new tests: use the shared editor or the stack, never a bare `malloc` that needs a `free` at the end.
+- **H0.10** As dev, I want objects rebuilt when an included header changes, so that a struct change cannot leave stale objects behind
+  - Found while adding the cursor fields to `editor_t`: `main.o` was built against the old, smaller struct and `notvim` crashed in `editor_init`.
+  - The Makefile now uses `-MMD -MP` and includes the `.d` files; `make clean` removes them.
+
+### H1 Terminal and display
+
+- **H1.1** As user, I want the terminal to enter in raw mode when running `notvim` and to be restored when exiting, so that the editor handles my input without breaking shell
+  - Verified by hand at the time: raw mode active, `Ctrl+C` does not kill, terminal restored on exit. Automated later by H0.3.
+- **H1.2** As user, I want to leave notvim with `Ctrl+Q`, so I can go back to shell
+- **H1.3** As user, I want to see buffer content at my screen, so I can know what I am editing
+- **H1.4** As user, I want to run `notvim file.txt` and see all its lines, up to the terminal height, so I can read the file
+  - Merges the former H1.4 (first line) and H1.5 (all lines).
+  - Loading: a missing file gives an empty editor and is not created until `:w` (H4.1), as in Vim. A final newline does not add an empty line.
+  - Loading errors: any other open or read error makes `editor_load_file` return -1 with `errno` set and an empty editor.
+  - `notvim` then prints `notvim: <path>: <reason>` and exits 1 before entering raw mode, so the message shows on a normal terminal.
+  - Rendering: lines are joined by `\r\n`, because raw mode clears `OPOST` and a bare `\n` would not return to column 0. An OS-dependent line-ending macro was discussed and not added (UNIX only).
+  - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). There is no `SIGWINCH` handling.
+  - Known gaps:
+    - CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line).
+    - The out-of-memory path of `editor_load_file`, and the cleanup after a read error halfway through a file, are not tested.
+  - Lines wider than the terminal were not clipped here; solved in H2.4.
+
+### H2 Navigation
+
+- **H2.1** As user, I want to move the cursor with the arrow keys, so I can navigate the text
+  - Design, step 1: a pure key decoder (`keys.c`), fed one byte at a time.
+    - `ESC [ A/B/C/D` become `KEY_UP/DOWN/RIGHT/LEFT`.
+    - Any other escape sequence (for example `ESC [ 3 ~`) is ignored without breaking the next key.
+    - Ordinary bytes pass through, `Ctrl+Q` included.
+  - Design, step 2: a cursor in `editor_t` (`cy`, `cx`, byte indexes) with `editor_move_cursor`.
+    - No wrapping; up and down clamp to the lines, and the column to the line length.
+    - Right stops on the last character (Vim normal mode); an empty editor keeps the cursor at 0,0.
+  - Design, step 3: `editor_draw` writes clear screen + home + `editor_render` + a cursor-position sequence.
+    - The main loop redraws after each key. `editor_render` stays pure text.
+  - `editor_draw` redraws the whole screen after every move (no diffing) and reserves `EDITOR_DRAW_OVERHEAD` bytes so the cursor sequence is never cut.
+  - `main` checks `key < 256` before `editor_should_exit`, so a key code above 255 can never alias a byte. This is an equivalent mutant today, kept on purpose.
+  - Ordinary keys and swallowed sequences do not redraw.
+  - Known gaps:
+    - A lone `ESC` is never reported (needs a timeout, planned with H3.1).
+    - `cx` counts bytes, so UTF-8 text puts the cursor mid-character.
+    - No remembered "wanted column" when passing through short lines (Vim's curswant).
+- **H2.2** As user, I want to move the cursor with `h j k l`, as in Vim
+  - The mapping is `key_to_move` in `main.c`, tested end to end on a pty. It behaves exactly like the arrows, so the clamping rules are not retested.
+  - Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
+  - To do with H3.1: apply the mapping only in normal mode.
+- **H2.3** As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
+  - Design: `editor_t` gets `rowoff`, the index of the first visible line.
+    - `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`.
+    - `editor_render` starts at `rowoff`, and `editor_draw` puts the cursor on row `cy - rowoff + 1`.
+    - `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0.
+  - Decisions: vertical only, one line at a time (no half-page jumps or `scrolloff` margin). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state.
+  - Known gaps: no rows are reserved for a status line yet (H5.1). The whole screen is still redrawn after every key.
+- **H2.4** As user, I want the editor to draw on the alternate screen and clip lines to the terminal width, so that my shell screen is left untouched and the first lines never scroll out of view
+  - Found by running `./notvim BACKLOG.md` in a real terminal emulator, which the pty tests could not show.
+  - Clipping: lines wider than the terminal wrapped onto extra rows, so the screen overflowed and the terminal scrolled the title away.
+    - The first 24 lines of `BACKLOG.md` needed 35 rows, and the cursor row still said 1.
+    - `editor_render` and `editor_draw` now take `max_cols` and clip each line; the drawn cursor column stops at the last column.
+  - Alternate screen: `ESC [ 2 J` does not wipe a terminal emulator's screen, it pushes it into scrollback and leaves blank space (like `Ctrl+L`).
+    - `main` enters the alternate screen (`ESC [ ? 1049 h`) after raw mode and leaves it (`l`) at exit, before restoring the tty modes.
+    - The shell screen and scrollback are untouched, as in Vim.
+  - `terminal_enter_alt_screen`/`terminal_leave_alt_screen` are idempotent like raw mode. A load error is printed before either starts, so it stays on the normal screen.
+  - Known gaps:
+    - Widths are counted in bytes, so tabs and UTF-8 text can still make a line wider than the terminal (H2.5, or a tab story).
+    - The tests check the exact byte stream on a pty; what a real emulator shows was checked by hand.
