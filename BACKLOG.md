@@ -2,13 +2,10 @@
 
 ## In progress
 
-- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
-> Design (H2.3): `editor_t` gets `rowoff`, the index of the first visible line. `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`; `editor_render` starts at `rowoff`; `editor_draw` puts the cursor on row `cy - rowoff + 1`; `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0. Steps: (1) the editor functions with unit tests, (2) `main` wiring with a pty test on a short terminal.
-> Decisions (H2.3): vertical scrolling only, one line at a time (no half-page jumps or `scrolloff` margin); no horizontal scrolling, so long lines are still cut by the draw buffer (see H1.4). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state. Rows reserved for a status line (H5.1) are not subtracted yet.
+- H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
 
 ## To do
 
-- H3.1: As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
 - H3.2: As user, I want to type characters in insert mode and see them in the buffer
 - H3.3: As user, I want `Backspace` and `Enter` to work in insert mode
 - H4.1: As user, I want to save with `:w`, so I don't lose my work
@@ -51,3 +48,8 @@
 > Known gaps (H2.1): a lone `ESC` is never reported; the cursor can sit below the visible rows (terminal clamps it) until H2.3; `cx` counts bytes, so UTF-8 text puts the cursor mid-character; no remembered column when passing through short lines.
 - H2.2: As user, I want to move the cursor with `h j k l`, as in Vim
 > Notice (H2.2): the mapping lives in `key_to_move` in `main.c` and is tested end to end on a pty; it behaves exactly like the arrows, so the clamping rules are not retested. When insert mode arrives (H3.1) the mapping must apply only in normal mode, because `h` has to type `h` there. Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
+- H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
+> Design (H2.3, as implemented): `editor_t` gets `rowoff`, the index of the first visible line. `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`; `editor_render` starts at `rowoff`; `editor_draw` puts the cursor on row `cy - rowoff + 1`; `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0. Steps: (1) the editor functions with unit tests, (2) `main` wiring with a pty test on a short terminal.
+> Decisions (H2.3): vertical scrolling only, one line at a time (no half-page jumps or `scrolloff` margin); no horizontal scrolling, so long lines are still cut by the draw buffer (see H1.4). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state. Rows reserved for a status line (H5.1) are not subtracted yet.
+> Known gaps (H2.3): `main` scrolls with the full terminal height, so a status line (H5.1) will need `rows - 1`; the whole screen is still redrawn after every key; a window taller than the file leaves `rowoff` at 0.
+
