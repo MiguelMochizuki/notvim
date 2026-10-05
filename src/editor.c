@@ -334,7 +334,7 @@ const char *editor_mode_label(const editor_t *e) {
 /**
  * @brief Insert the @p n bytes of @p s (no NUL among them) into line @p y of @p e at byte index @p at, growing the line with realloc.
  *
- * Sets @c modified. The cursor is not touched. Task 4's delete and split reuse this file's line helpers.
+ * Sets @c modified. The cursor is not touched. line_remove(), line_split() and line_join() are its counterparts.
  *
  * @return 0 on success, -1 with the line unchanged if the memory can't be had.
  */
@@ -347,6 +347,93 @@ static int line_insert(editor_t *e, size_t y, size_t at, const char *s, size_t n
 	e->lines[y] = line;
 	e->modified = 1;
 	return 0;
+}
+
+/** @brief Remove the @p n bytes at byte index @p at of line @p y of @p e (they must be inside it). Sets @c modified; the cursor is not touched. */
+static void line_remove(editor_t *e, size_t y, size_t at, size_t n) {
+	char *line = e->lines[y];
+	memmove(line + at, line + at + n, strlen(line + at + n) + 1);
+	e->modified = 1;
+}
+
+/**
+ * @brief Split line @p y of @p e at byte index @p at: the bytes from @p at on become a new line @p y + 1. Sets @c modified; the cursor is not touched.
+ * @return 0 on success, -1 with the text unchanged if the memory can't be had.
+ */
+static int line_split(editor_t *e, size_t y, size_t at) {
+	char *tail = strdup(e->lines[y] + at);
+	if (!tail) return -1;
+	if (e->count == e->cap) {
+		size_t cap = e->cap ? e->cap * 2 : 8;
+		char **lines = realloc(e->lines, cap * sizeof(*lines));
+		if (!lines) {
+			free(tail);
+			return -1;
+		}
+		e->lines = lines;
+		e->cap = cap;
+	}
+	memmove(e->lines + y + 2, e->lines + y + 1, (e->count - y - 1) * sizeof(*e->lines));
+	e->lines[y + 1] = tail;
+	e->lines[y][at] = '\0'; /* the line keeps its allocation: shrinking in place cannot fail */
+	e->count++;
+	e->modified = 1;
+	return 0;
+}
+
+/**
+ * @brief Join line @p y + 1 of @p e to the end of line @p y and drop it (@p y + 1 must exist). Sets @c modified; the cursor is not touched.
+ * @return 0 on success, -1 with the text unchanged if the memory can't be had.
+ */
+static int line_join(editor_t *e, size_t y) {
+	char *next = e->lines[y + 1];
+	if (line_insert(e, y, strlen(e->lines[y]), next, strlen(next)) < 0) return -1;
+	free(next);
+	memmove(e->lines + y + 1, e->lines + y + 2, (e->count - y - 2) * sizeof(*e->lines));
+	e->count--;
+	return 0;
+}
+
+/** @brief Enter: split the line at the cursor (an editor with no lines gets two) and put the cursor at the start of the new line. */
+static int enter_key(editor_t *e) {
+	if (e->count == 0 && editor_append_line(e, "") < 0) return 0;
+	if (line_split(e, e->cy, e->cx) < 0) return 0;
+	e->cy++;
+	e->cx = 0;
+	e->wantcol = 0;
+	return 1;
+}
+
+/** @brief Backspace: delete the character before the cursor, or at column 0 join the line to the previous one with the cursor at the join; nothing at the start of the text. */
+static int backspace_key(editor_t *e) {
+	if (e->count == 0) return 0;
+	if (e->cx > 0) {
+		size_t prev = utf8_prev(e->lines[e->cy], e->cx);
+		line_remove(e, e->cy, prev, e->cx - prev);
+		e->cx = prev;
+	} else if (e->cy > 0) {
+		size_t join = strlen(e->lines[e->cy - 1]);
+		if (line_join(e, e->cy - 1) < 0) return 0;
+		e->cy--;
+		e->cx = join;
+	} else {
+		return 0;
+	}
+	e->wantcol = display_col(e->lines[e->cy], e->cx);
+	return 1;
+}
+
+/** @brief Delete: remove the character under the cursor, or at the end of the line join the next line to it; nothing at the end of the text. */
+static int delete_key(editor_t *e) {
+	if (e->count == 0) return 0;
+	const char *line = e->lines[e->cy];
+	if (line[e->cx]) {
+		line_remove(e, e->cy, e->cx, utf8_cell_len(line + e->cx));
+	} else if (e->cy + 1 >= e->count || line_join(e, e->cy) < 0) {
+		return 0;
+	}
+	e->wantcol = display_col(e->lines[e->cy], e->cx);
+	return 1;
 }
 
 /** @brief Type the @p n bytes of one character at the cursor: create the first line if there is none, insert, and move the cursor and the wanted column past it. */
@@ -376,6 +463,8 @@ static int type_byte(editor_t *e, unsigned char c) {
 		return utf8_valid_len(buf) == n ? type_char(e, buf, n) : 0;
 	}
 	e->pend_len = 0; /* a half character followed by anything else is dropped */
+	if (c == 0x7f || c == 0x08) return backspace_key(e);
+	if (c == '\r' || c == '\n') return enter_key(e);
 	if (c >= 0xc2 && c <= 0xf4) { /* lead of a multibyte character; the rest decides if it is valid */
 		e->pend[e->pend_len++] = (char)c;
 		return 0;
@@ -407,6 +496,8 @@ int editor_handle_key(editor_t *e, int key) {
 	case 'i':
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;
+	case KEY_DELETE:
+		return e->mode == EDITOR_MODE_INSERT && delete_key(e);
 	case KEY_ESC:
 		if (e->mode != EDITOR_MODE_INSERT) return 0;
 		leave_insert(e);

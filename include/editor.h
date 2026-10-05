@@ -168,6 +168,16 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * @c modified is set and the key returns non-zero; the caller scrolls with editor_scroll(). A failed allocation drops
  * the character and returns 0. KEY_ESC does nothing in normal mode.
  *
+ * Insert mode also edits the line structure. Enter (byte 0x0d or 0x0a) splits the line at the cursor: the text from the
+ * cursor on becomes a new line below, and the cursor goes to its start (an editor with no lines gets two empty lines).
+ * Backspace (0x7f or 0x08) deletes the character before the cursor, a whole UTF-8 character; at column 0 it joins the line
+ * to the end of the previous one, with the cursor at the join, and at column 0 of the first line it does nothing.
+ * KEY_DELETE deletes the character under the cursor, a whole one; at the end of a line it joins the next line to it,
+ * the cursor staying at the join, and at the end of the last line (or with no lines) it does nothing. Each of these sets
+ * @c modified and @c wantcol (to 0 after a split, to the display column of the cursor otherwise) and returns non-zero when
+ * it changed the text; one that does nothing returns 0 and leaves @c modified alone. They also drop a half typed
+ * character. In normal mode they do nothing yet. @c crlf is never touched; the caller scrolls.
+ *
  * In insert mode editor_move_cursor() lets the cursor go one past the last character: right stops at the end of the
  * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
  * at the end of the line if @c wantcol is at or past the end of it (an empty line: 0).

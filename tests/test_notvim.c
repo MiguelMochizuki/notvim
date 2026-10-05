@@ -584,6 +584,48 @@ static void test_notvim_typing_in_insert_mode(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, esc);
 }
 
+/** @brief Enter, Backspace and Delete in insert mode split and join lines: the exact screen after each key. */
+static void test_notvim_enter_backspace_and_delete_split_and_join_lines(void) {
+	const char *path = tmpdir_write("editing.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], out[8][1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "i", out[7], sizeof(out[7]));
+	send_and_read(master, "\r", out[0], sizeof(out[0]));      /* split at 0: "", abc, def */
+	send_and_read(master, "\x7f", out[1], sizeof(out[1]));    /* join back */
+	send_and_read(master, "\x1b[C", out[7], sizeof(out[7])); /* one key per write: each draws once */
+	send_and_read(master, "\x1b[C", out[7], sizeof(out[7]));
+	send_and_read(master, "\r", out[2], sizeof(out[2]));      /* ab, c, def */
+	send_and_read(master, "\x1b[3~", out[3], sizeof(out[3])); /* ab, "", def */
+	send_and_read(master, "\x1b[3~", out[4], sizeof(out[4])); /* ab, def: join with the next line */
+	send_and_read(master, "\x08", out[5], sizeof(out[5]));    /* ab, def -> abdef */
+	send_and_read(master, "\r", out[6], sizeof(out[6]));      /* split at 2: ab, def */
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[1024];
+	shown_mode = "INSERT";
+	shown_modified = 1;
+	screen(expected, sizeof(expected), "\r\nabc\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[0]);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[1]);
+	screen(expected, sizeof(expected), "ab\r\nc\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[2]);
+	screen(expected, sizeof(expected), "ab\r\n\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[3]);
+	screen(expected, sizeof(expected), "ab\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[4]);
+	screen(expected, sizeof(expected), "abdef", 1, 3);
+	TEST_ASSERT_EQUAL_STRING(expected, out[5]);
+	screen(expected, sizeof(expected), "ab\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out[6]);
+}
+
 /** @brief The status line says "[No Name] INSERT" in insert mode, literally, and Ctrl+Q quits from insert mode. */
 static void test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode(void) {
 	int master;
@@ -599,7 +641,7 @@ static void test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode(void)
 	TEST_ASSERT_NOT_NULL(strstr(ins, "\x1b[24;1H\x1b[7m[No Name] INSERT"));
 }
 
-/** @brief An escape sequence that is not an arrow (Delete) is ignored and does not redraw. */
+/** @brief An escape sequence that is neither an arrow nor Delete (Page Up) is ignored and does not redraw. */
 static void test_notvim_ignored_escape_sequence_does_not_redraw(void) {
 	const char *path = tmpdir_write("ignored.txt", "abc\n");
 	TEST_ASSERT_NOT_NULL(path);
@@ -608,7 +650,7 @@ static void test_notvim_ignored_escape_sequence_does_not_redraw(void) {
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
-	size_t n = send_and_read(master, "\x1b[3~", after, sizeof(after));
+	size_t n = send_and_read(master, "\x1b[5~", after, sizeof(after));
 	int status = quit_and_wait(master, pid);
 	close(master);
 	TEST_ASSERT_TRUE(raw);
@@ -1808,6 +1850,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);
 	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);
 	RUN_TEST(test_notvim_typing_in_insert_mode);
+	RUN_TEST(test_notvim_enter_backspace_and_delete_split_and_join_lines);
 	RUN_TEST(test_notvim_status_says_insert_and_ctrl_q_quits_in_insert_mode);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);

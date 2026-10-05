@@ -14,7 +14,8 @@ enum {
 	KEY_DOWN,     /**< Arrow down: ESC [ B. */
 	KEY_RIGHT,    /**< Arrow right: ESC [ C. */
 	KEY_LEFT,     /**< Arrow left: ESC [ D. */
-	KEY_ESC       /**< A lone Esc: ESC with nothing after it for KEY_ESC_TIMEOUT_MS. */
+	KEY_ESC,      /**< A lone Esc: ESC with nothing after it for KEY_ESC_TIMEOUT_MS. */
+	KEY_DELETE    /**< The Delete key: ESC [ 3 ~. */
 };
 
 /** How long to wait for the rest of an escape sequence after ESC, in milliseconds. */
@@ -24,6 +25,7 @@ enum {
 typedef struct {
 	int state;      /**< Where in an escape sequence the decoder is. */
 	int has_params; /**< Non-zero if the current CSI sequence has parameter bytes. */
+	int is_delete;  /**< Non-zero if the parameter bytes so far are exactly "3". */
 } key_parser_t;
 
 /**
@@ -35,8 +37,9 @@ void key_parser_init(key_parser_t *p);
 /**
  * @brief Feed one input byte to the decoder.
  *
- * ESC [ A/B/C/D give KEY_UP/KEY_DOWN/KEY_RIGHT/KEY_LEFT. Any other escape
- * sequence (with parameters such as ESC [ 3 ~, or ESC followed by a byte
+ * ESC [ A/B/C/D give KEY_UP/KEY_DOWN/KEY_RIGHT/KEY_LEFT and ESC [ 3 ~ gives
+ * KEY_DELETE. Any other escape
+ * sequence (with parameters such as ESC [ 5 ~, or ESC followed by a byte
  * other than '[') is swallowed. A second ESC restarts a sequence. A lone ESC
  * cannot be told apart from the start of a sequence, so it is only reported
  * as KEY_NONE until key_parser_timeout() says that nothing else is coming.

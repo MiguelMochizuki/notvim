@@ -46,12 +46,42 @@ static void test_keys_lone_escape_returns_none(void) {
 	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b"));
 }
 
-/** @brief A sequence with parameters (ESC [ 3 ~) is swallowed and the next key still works. */
+/** @brief A sequence with parameters (ESC [ 5 ~, Page Up) is swallowed and the next key still works. */
 static void test_keys_sequence_with_params_is_swallowed(void) {
 	key_parser_t p;
 	key_parser_init(&p);
-	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b[3~"));
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b[5~"));
 	TEST_ASSERT_EQUAL_INT('a', feed(&p, "a"));
+}
+
+/** @brief ESC [ 3 ~ is the Delete key, and the decoder is ready for the next key. */
+static void test_keys_delete_is_decoded(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_EQUAL_INT(KEY_DELETE, feed(&p, "\x1b[3~"));
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	TEST_ASSERT_EQUAL_INT('a', feed(&p, "a"));
+	TEST_ASSERT_EQUAL_INT(KEY_DELETE, feed(&p, "\x1b[3~"));
+	TEST_ASSERT_TRUE(KEY_DELETE > 255);
+}
+
+/** @brief Only exactly "3" before the "~" is Delete: modifiers, other numbers and other finals are swallowed. */
+static void test_keys_delete_lookalikes_are_swallowed(void) {
+	const char *seqs[] = { "\x1b[3;5~", "\x1b[33~", "\x1b[13~", "\x1b[3;~", "\x1b[23~", "\x1b[3A", "\x1b[3m", "\x1b[5~", "\x1b[~" };
+	for (size_t i = 0; i < sizeof(seqs) / sizeof(seqs[0]); i++) {
+		key_parser_t p;
+		key_parser_init(&p);
+		TEST_ASSERT_EQUAL_INT_MESSAGE(KEY_NONE, feed(&p, seqs[i]), seqs[i]);
+		TEST_ASSERT_EQUAL_INT('a', feed(&p, "a"));
+	}
+}
+
+/** @brief A second sequence after an aborted "3" does not inherit it: ESC [ 3 ESC [ ~ is not Delete. */
+static void test_keys_delete_state_does_not_leak_between_sequences(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b[3\x1b[~"));
+	TEST_ASSERT_EQUAL_INT(KEY_DELETE, feed(&p, "\x1b[3~"));
 }
 
 /** @brief Ctrl+right (ESC [ 1 ; 5 C) has parameters, so it is not an arrow. */
@@ -158,6 +188,9 @@ void test_keys_suite(void) {
 	RUN_TEST(test_keys_arrows_are_decoded);
 	RUN_TEST(test_keys_lone_escape_returns_none);
 	RUN_TEST(test_keys_sequence_with_params_is_swallowed);
+	RUN_TEST(test_keys_delete_is_decoded);
+	RUN_TEST(test_keys_delete_lookalikes_are_swallowed);
+	RUN_TEST(test_keys_delete_state_does_not_leak_between_sequences);
 	RUN_TEST(test_keys_arrow_with_params_is_swallowed);
 	RUN_TEST(test_keys_unknown_final_byte_is_swallowed);
 	RUN_TEST(test_keys_escape_then_other_byte_is_swallowed);

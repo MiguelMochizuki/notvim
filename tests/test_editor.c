@@ -2700,10 +2700,10 @@ static void test_editor_tab_inserts_a_tab(void) {
 	TEST_ASSERT_EQUAL_UINT(8, e.wantcol);
 }
 
-/** @brief Other control keys are ignored: no change, no redraw, not modified. */
+/** @brief Control keys other than Enter and Backspace are ignored: no change, no redraw, not modified. */
 static void test_editor_control_keys_are_ignored_when_typing(void) {
 	insert_at("abc", 1);
-	const int ignored[] = { 0x01, 0x07, '\r', '\n', 0x08, 0x7f, 0x1f, 0x00 };
+	const int ignored[] = { 0x01, 0x07, 0x1f, 0x00 };
 	for (size_t i = 0; i < sizeof(ignored) / sizeof(*ignored); i++) TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, ignored[i]));
 	assert_line(&e, 0, "abc");
 	assert_cursor(0, 1);
@@ -2773,6 +2773,390 @@ static void test_editor_typing_at_the_bottom_of_a_window_scrolls(void) {
 	TEST_ASSERT_EQUAL_UINT(6, e.rowoff);
 	assert_line(&e, 9, "Xline");
 	assert_cursor(9, 1);
+}
+
+/** @brief Send KEY_DELETE to the shared editor; return what editor_handle_key() returned. */
+static int del(void) {
+	return editor_handle_key(&e, KEY_DELETE);
+}
+
+/** @brief Assert the wanted column of the shared editor. */
+static void assert_wantcol(size_t col) {
+	TEST_ASSERT_EQUAL_UINT(col, e.wantcol);
+}
+
+/** @brief Enter splits at the cursor: middle, end and start of a line; the cursor goes to the start of the new line (Vim: same). */
+static void test_editor_enter_splits_the_line(void) {
+	insert_at("abcd", 2);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, '\r'));
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "ab");
+	assert_line(&e, 1, "cd");
+	assert_cursor(1, 0);
+	assert_wantcol(0);
+	TEST_ASSERT_TRUE(e.modified);
+	insert_at("ab", 2);
+	press("\r");
+	assert_line(&e, 0, "ab");
+	assert_line(&e, 1, "");
+	assert_cursor(1, 0);
+	insert_at("ab", 0);
+	press("\r");
+	assert_line(&e, 0, "");
+	assert_line(&e, 1, "ab");
+	assert_cursor(1, 0);
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+}
+
+/** @brief The byte 0x0a splits like 0x0d, and typing goes on in the new line. */
+static void test_editor_line_feed_splits_like_carriage_return(void) {
+	insert_at("abcd", 2);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, '\n'));
+	type("X");
+	assert_line(&e, 0, "ab");
+	assert_line(&e, 1, "Xcd");
+	assert_cursor(1, 1);
+}
+
+/** @brief Enter in the middle of a text keeps the lines before and after in order. */
+static void test_editor_enter_in_the_middle_of_a_text(void) {
+	editor_init(&e);
+	append("one");
+	append("two");
+	append("three");
+	press("jiR\r");
+	TEST_ASSERT_EQUAL_UINT(4, editor_line_count(&e));
+	assert_line(&e, 0, "one");
+	assert_line(&e, 1, "t");
+	assert_line(&e, 2, "wo");
+	assert_line(&e, 3, "three");
+	assert_cursor(2, 0);
+	press("\r\r\r\r\r\r\r\r\r\r");
+	TEST_ASSERT_EQUAL_UINT(14, editor_line_count(&e));
+	assert_line(&e, 12, "wo");
+	assert_line(&e, 13, "three");
+}
+
+/** @brief Enter in an editor with no lines gives two empty lines and the cursor on the second, as Vim does. */
+static void test_editor_enter_in_an_empty_editor(void) {
+	editor_init(&e);
+	press("i");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, '\r'));
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "");
+	assert_line(&e, 1, "");
+	assert_cursor(1, 0);
+	TEST_ASSERT_TRUE(e.modified);
+}
+
+/** @brief Enter never cuts a multibyte character, and the wanted column is the new cursor's. */
+static void test_editor_enter_with_multibyte_text_and_wantcol(void) {
+	insert_at("a\xc3\xa9\xe2\x82\xac" "b", 2);
+	assert_wantcol(2);
+	press("\r");
+	assert_line(&e, 0, "a\xc3\xa9");
+	assert_line(&e, 1, "\xe2\x82\xac" "b");
+	assert_cursor(1, 0);
+	assert_wantcol(0);
+	press("U");
+	assert_cursor(0, 0);
+}
+
+/** @brief Enter at the bottom of the window moves the window by one line. */
+static void test_editor_enter_at_the_bottom_of_a_window_scrolls(void) {
+	editor_init(&e);
+	for (int i = 0; i < 10; i++) append("line");
+	press("iDDDDDDDDD");
+	editor_scroll(&e, 4);
+	TEST_ASSERT_EQUAL_UINT(6, e.rowoff);
+	press("\r");
+	editor_scroll(&e, 4);
+	TEST_ASSERT_EQUAL_UINT(11, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_UINT(7, e.rowoff);
+	assert_cursor(10, 0);
+}
+
+/** @brief Backspace deletes the character before the cursor and moves the cursor and wantcol back (0x7f and 0x08). */
+static void test_editor_backspace_deletes_the_previous_character(void) {
+	insert_at("abc", 2);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0x7f));
+	assert_line(&e, 0, "ac");
+	assert_cursor(0, 1);
+	assert_wantcol(1);
+	TEST_ASSERT_TRUE(e.modified);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0x08));
+	assert_line(&e, 0, "c");
+	assert_cursor(0, 0);
+	insert_at("abc", 3);
+	press("\x7f");
+	assert_line(&e, 0, "ab");
+	assert_cursor(0, 2);
+	assert_wantcol(2);
+}
+
+/** @brief Backspace removes a whole multibyte character (2, 3 and 4 bytes), never one byte of it (Vim: same). */
+static void test_editor_backspace_deletes_a_whole_multibyte_character(void) {
+	insert_at("a\xc3\xa9" "b", 2);
+	press("\x7f");
+	assert_line(&e, 0, "ab");
+	assert_cursor(0, 1);
+	insert_at("\xe2\x82\xac" "x", 1);
+	press("\x7f");
+	assert_line(&e, 0, "x");
+	assert_cursor(0, 0);
+	insert_at("a\xf0\x9f\x98\x80", 2);
+	press("\x7f");
+	assert_line(&e, 0, "a");
+	assert_cursor(0, 1);
+	assert_wantcol(1);
+}
+
+/** @brief Backspace after a tab brings wantcol back to the column before it. */
+static void test_editor_backspace_after_a_tab(void) {
+	insert_at("a\tb", 3);
+	assert_wantcol(9);
+	press("\x7f");
+	assert_line(&e, 0, "a\t");
+	assert_wantcol(8);
+	press("\x7f");
+	assert_line(&e, 0, "a");
+	assert_wantcol(1);
+}
+
+/** @brief Backspace at the start of a line joins it to the end of the previous one; the cursor sits at the join (Vim: same). */
+static void test_editor_backspace_at_the_start_of_a_line_joins(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	press("ji");
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0x7f));
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "abcd");
+	assert_line(&e, 1, "ef");
+	assert_cursor(0, 2);
+	assert_wantcol(2);
+	TEST_ASSERT_TRUE(e.modified);
+	type("X");
+	assert_line(&e, 0, "abXcd");
+}
+
+/** @brief Joining takes the display column of the join (a tab counts), and keeps the lines around it. */
+static void test_editor_join_sets_wantcol_from_the_display_column(void) {
+	editor_init(&e);
+	append("x");
+	append("a\t");
+	append("b");
+	append("y");
+	press("jji");
+	press("\x7f");
+	assert_line(&e, 1, "a\tb");
+	assert_line(&e, 2, "y");
+	assert_cursor(1, 2);
+	assert_wantcol(8);
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+}
+
+/** @brief Joining with an empty previous line, an empty current line, and the last line; the text of the others is intact. */
+static void test_editor_join_with_empty_lines_and_at_the_end(void) {
+	editor_init(&e);
+	append("");
+	append("cd");
+	press("ji\x7f");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "cd");
+	assert_cursor(0, 0);
+	editor_free(&e);
+	append("ab");
+	append("");
+	press("ji\x7f");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "ab");
+	assert_cursor(0, 2);
+	editor_free(&e);
+	append("");
+	append("");
+	append("");
+	press("jji\x7f");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	press("\x7f\x7f");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "");
+	assert_cursor(0, 0);
+}
+
+/** @brief Joining keeps valid UTF-8 whole, including the invalid bytes, and the joined line is terminated. */
+static void test_editor_join_keeps_utf8_and_terminates_the_line(void) {
+	editor_init(&e);
+	append("\xc3\xa9\xff");
+	append("\xe2\x82\xac\xf0\x9f\x98\x80");
+	press("ji\x7f");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "\xc3\xa9\xff\xe2\x82\xac\xf0\x9f\x98\x80");
+	TEST_ASSERT_EQUAL_UINT(10, strlen(editor_line(&e, 0)));
+	assert_cursor(0, 3);
+	static char big_a[5001], big_b[5001];
+	memset(big_a, 'a', 5000);
+	memset(big_b, 'b', 5000);
+	big_a[5000] = big_b[5000] = '\0';
+	editor_free(&e);
+	append(big_a);
+	append(big_b);
+	press("ji\x7f");
+	size_t len = strlen(editor_line(&e, 0));
+	TEST_ASSERT_EQUAL_UINT(10000, len);
+	TEST_ASSERT_EQUAL_UINT(5000, e.cx);
+	TEST_ASSERT_EQUAL_CHAR('b', editor_line(&e, 0)[5000]);
+}
+
+/** @brief Backspace on the first character of the first line does nothing: no change, no redraw, not modified. */
+static void test_editor_backspace_at_the_start_of_the_buffer_does_nothing(void) {
+	insert_at("ab", 0);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x7f));
+	assert_line(&e, 0, "ab");
+	assert_cursor(0, 0);
+	TEST_ASSERT_FALSE(e.modified);
+	editor_free(&e);
+	append("");
+	press("i");
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x7f));
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	editor_free(&e);
+	press("i");
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x7f));
+	TEST_ASSERT_EQUAL_INT(0, del());
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_FALSE(e.modified);
+}
+
+/** @brief Delete removes the character under the cursor, a whole multibyte one, and the cursor stays (Vim: same). */
+static void test_editor_delete_removes_the_character_under_the_cursor(void) {
+	insert_at("abc", 1);
+	TEST_ASSERT_NOT_EQUAL(0, del());
+	assert_line(&e, 0, "ac");
+	assert_cursor(0, 1);
+	assert_wantcol(1);
+	TEST_ASSERT_TRUE(e.modified);
+	insert_at("\xc3\xa9" "b", 0);
+	del();
+	assert_line(&e, 0, "b");
+	assert_cursor(0, 0);
+	insert_at("\xe2\x82\xac\xf0\x9f\x98\x80" "z", 1);
+	del();
+	assert_line(&e, 0, "\xe2\x82\xac" "z");
+	assert_cursor(0, 3);
+	del();
+	assert_line(&e, 0, "\xe2\x82\xac");
+	assert_cursor(0, 3);
+}
+
+/** @brief Delete at the end of a line joins the next one; the cursor stays at the join (Vim: same). */
+static void test_editor_delete_at_the_end_of_a_line_joins(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	append("ef");
+	press("iRR");
+	TEST_ASSERT_NOT_EQUAL(0, del());
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "abcd");
+	assert_line(&e, 1, "ef");
+	assert_cursor(0, 2);
+	assert_wantcol(2);
+	TEST_ASSERT_TRUE(e.modified);
+	type("X");
+	assert_line(&e, 0, "abXcd");
+}
+
+/** @brief Delete at the end of an empty line, joining an empty next line, and the last line (nothing). */
+static void test_editor_delete_with_empty_lines_and_at_the_end(void) {
+	editor_init(&e);
+	append("");
+	append("cd");
+	append("");
+	press("iR"); /* empty line: the cursor is at its end */
+	TEST_ASSERT_NOT_EQUAL(0, del());
+	assert_line(&e, 0, "cd");
+	assert_line(&e, 1, "");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	press("RR");
+	del();
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "cd");
+	assert_cursor(0, 2);
+	e.modified = 0;
+	TEST_ASSERT_EQUAL_INT(0, del());
+	assert_line(&e, 0, "cd");
+	assert_cursor(0, 2);
+	TEST_ASSERT_FALSE(e.modified);
+}
+
+/** @brief The three keys do nothing in normal mode. */
+static void test_editor_editing_keys_do_nothing_in_normal_mode(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	press("j");
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x7f));
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 0x08));
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, '\r'));
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, '\n'));
+	TEST_ASSERT_EQUAL_INT(0, del());
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "ab");
+	assert_line(&e, 1, "cd");
+	assert_cursor(1, 0);
+	TEST_ASSERT_FALSE(e.modified);
+}
+
+/** @brief A half typed character is dropped by Backspace, which still deletes what is before the cursor. */
+static void test_editor_backspace_drops_a_half_typed_character(void) {
+	insert_at("ab", 2);
+	editor_handle_key(&e, 0xc3);
+	TEST_ASSERT_EQUAL_UINT(1, e.pend_len);
+	press("\x7f");
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	assert_line(&e, 0, "a");
+	editor_handle_key(&e, 0xc3);
+	press("\r");
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	editor_handle_key(&e, 0xa9);
+	assert_line(&e, 1, "");
+}
+
+/** @brief A CRLF file is edited and stays CRLF: lines carry no CR, and splitting and joining leave the flag alone. */
+static void test_editor_line_keys_keep_the_crlf_flag(void) {
+	editor_init(&e);
+	load_text("ab\r\ncd\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	press("iR\r");
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "b");
+	assert_line(&e, 2, "cd");
+	press("\x7f");
+	assert_line(&e, 0, "ab");
+	press("RR");
+	del();
+	assert_line(&e, 0, "abcd");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	TEST_ASSERT_TRUE(e.modified);
+}
+
+/** @brief Many splits and joins in a row (the line array grows and shrinks) end with the original text. */
+static void test_editor_many_splits_and_joins_round_trip(void) {
+	insert_at("abc", 0);
+	for (int i = 0; i < 40; i++) press("\r");
+	TEST_ASSERT_EQUAL_UINT(41, editor_line_count(&e));
+	for (int i = 0; i < 40; i++) press("\x7f");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "abc");
+	assert_cursor(0, 0);
+	for (int i = 0; i < 40; i++) press("\r");
+	press("U");
+	for (int i = 0; i < 40; i++) del(); /* one join, "abc" erased, the rest do nothing on the last line */
+	TEST_ASSERT_EQUAL_UINT(40, editor_line_count(&e));
+	assert_line(&e, 39, "");
 }
 
 /** @brief In normal mode h, j, k, l and the arrows move and ask for a redraw. */
@@ -3470,6 +3854,27 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_tab_inserts_a_tab);
 	RUN_TEST(test_editor_control_keys_are_ignored_when_typing);
 	RUN_TEST(test_editor_typing_a_very_long_line);
+	RUN_TEST(test_editor_enter_splits_the_line);
+	RUN_TEST(test_editor_line_feed_splits_like_carriage_return);
+	RUN_TEST(test_editor_enter_in_the_middle_of_a_text);
+	RUN_TEST(test_editor_enter_in_an_empty_editor);
+	RUN_TEST(test_editor_enter_with_multibyte_text_and_wantcol);
+	RUN_TEST(test_editor_enter_at_the_bottom_of_a_window_scrolls);
+	RUN_TEST(test_editor_backspace_deletes_the_previous_character);
+	RUN_TEST(test_editor_backspace_deletes_a_whole_multibyte_character);
+	RUN_TEST(test_editor_backspace_after_a_tab);
+	RUN_TEST(test_editor_backspace_at_the_start_of_a_line_joins);
+	RUN_TEST(test_editor_join_sets_wantcol_from_the_display_column);
+	RUN_TEST(test_editor_join_with_empty_lines_and_at_the_end);
+	RUN_TEST(test_editor_join_keeps_utf8_and_terminates_the_line);
+	RUN_TEST(test_editor_backspace_at_the_start_of_the_buffer_does_nothing);
+	RUN_TEST(test_editor_delete_removes_the_character_under_the_cursor);
+	RUN_TEST(test_editor_delete_at_the_end_of_a_line_joins);
+	RUN_TEST(test_editor_delete_with_empty_lines_and_at_the_end);
+	RUN_TEST(test_editor_editing_keys_do_nothing_in_normal_mode);
+	RUN_TEST(test_editor_backspace_drops_a_half_typed_character);
+	RUN_TEST(test_editor_line_keys_keep_the_crlf_flag);
+	RUN_TEST(test_editor_many_splits_and_joins_round_trip);
 	RUN_TEST(test_editor_modified_is_set_by_typing_and_cleared_by_load);
 	RUN_TEST(test_editor_typing_keeps_the_crlf_flag);
 	RUN_TEST(test_editor_status_shows_the_modified_mark);
