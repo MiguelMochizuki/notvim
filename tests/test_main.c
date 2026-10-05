@@ -4,6 +4,7 @@
  */
 #include "unity.h"
 #include "test_editor.h"
+#include "test_keys.h"
 #include "test_terminal.h"
 #include "test_notvim.h"
 #include "test_tmpdir.h"
@@ -21,6 +22,7 @@ void tearDown(void) {
 int main(void) {
 	UNITY_BEGIN();
 	test_editor_suite();
+	test_keys_suite();
 	test_terminal_suite();
 	test_notvim_suite();
 	test_tmpdir_suite();
