@@ -2,6 +2,7 @@
  * @file terminal.c
  * @brief Implementation of terminal.h. Public symbols are documented there.
  */
+#include <sys/ioctl.h>
 #include <unistd.h>
 #include <termios.h>
 #include "terminal.h"
@@ -34,4 +35,11 @@ void terminal_leave_raw(int fd) {
 	if (!raw_active) return;
 	tcsetattr(fd, TCSAFLUSH, &saved_termios);
 	raw_active = 0;
+}
+
+void terminal_get_size(int fd, int *rows, int *cols) {
+	struct winsize ws;
+	int ok = ioctl(fd, TIOCGWINSZ, &ws) == 0;
+	*rows = ok && ws.ws_row > 0 ? ws.ws_row : TERMINAL_DEFAULT_ROWS;
+	*cols = ok && ws.ws_col > 0 ? ws.ws_col : TERMINAL_DEFAULT_COLS;
 }

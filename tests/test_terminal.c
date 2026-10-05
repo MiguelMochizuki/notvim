@@ -2,6 +2,7 @@
  * @file test_terminal.c
  * @brief Unit and pty-based tests for terminal.c.
  */
+#include <sys/ioctl.h>
 #include <termios.h>
 #include <string.h>
 #include <pty.h>
@@ -137,6 +138,65 @@ static void test_leave_raw_twice_is_noop(void) {
 	close(slave);
 }
 
+/** @brief Set the window size of the pty behind @p master. */
+static void set_winsize(int master, unsigned short rows, unsigned short cols) {
+	struct winsize ws = { .ws_row = rows, .ws_col = cols };
+	TEST_ASSERT_EQUAL_INT(0, ioctl(master, TIOCSWINSZ, &ws));
+}
+
+/** @brief Assert that terminal_get_size(@p fd) gives @p rows x @p cols. */
+static void assert_size(int fd, int rows, int cols) {
+	int r = -1, c = -1;
+	terminal_get_size(fd, &r, &c);
+	TEST_ASSERT_EQUAL_INT(rows, r);
+	TEST_ASSERT_EQUAL_INT(cols, c);
+}
+
+/** @brief A terminal with a known size reports it. */
+static void test_terminal_get_size_reads_pty_size(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	set_winsize(master, 30, 100);
+	assert_size(slave, 30, 100);
+	close(master);
+	close(slave);
+}
+
+/** @brief A pty that reports 0x0 falls back to the defaults. */
+static void test_terminal_get_size_falls_back_on_zero_size(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	assert_size(slave, TERMINAL_DEFAULT_ROWS, TERMINAL_DEFAULT_COLS);
+	close(master);
+	close(slave);
+}
+
+/** @brief Only the dimension reported as 0 falls back. */
+static void test_terminal_get_size_falls_back_per_dimension(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	set_winsize(master, 10, 0);
+	assert_size(slave, 10, TERMINAL_DEFAULT_COLS);
+	set_winsize(master, 0, 120);
+	assert_size(slave, TERMINAL_DEFAULT_ROWS, 120);
+	close(master);
+	close(slave);
+}
+
+/** @brief A descriptor that is not a terminal gives the defaults. */
+static void test_terminal_get_size_falls_back_when_not_a_tty(void) {
+	int fds[2];
+	TEST_ASSERT_EQUAL_INT(0, pipe(fds));
+	assert_size(fds[0], TERMINAL_DEFAULT_ROWS, TERMINAL_DEFAULT_COLS);
+	close(fds[0]);
+	close(fds[1]);
+}
+
+/** @brief An invalid descriptor gives the defaults. */
+static void test_terminal_get_size_falls_back_on_invalid_fd(void) {
+	assert_size(-1, TERMINAL_DEFAULT_ROWS, TERMINAL_DEFAULT_COLS);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_terminal_suite(void) {
 	RUN_TEST(test_terminal_sets_raw_flags);
@@ -145,4 +205,9 @@ void test_terminal_suite(void) {
 	RUN_TEST(test_enter_raw_twice_still_restores_original);
 	RUN_TEST(test_leave_raw_without_enter_is_noop);
 	RUN_TEST(test_leave_raw_twice_is_noop);
+	RUN_TEST(test_terminal_get_size_reads_pty_size);
+	RUN_TEST(test_terminal_get_size_falls_back_on_zero_size);
+	RUN_TEST(test_terminal_get_size_falls_back_per_dimension);
+	RUN_TEST(test_terminal_get_size_falls_back_when_not_a_tty);
+	RUN_TEST(test_terminal_get_size_falls_back_on_invalid_fd);
 }

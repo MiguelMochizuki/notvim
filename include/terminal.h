@@ -7,6 +7,11 @@
 
 #include <termios.h>
 
+/** Rows assumed when the terminal size can't be read. */
+#define TERMINAL_DEFAULT_ROWS 24
+/** Columns assumed when the terminal size can't be read. */
+#define TERMINAL_DEFAULT_COLS 80
+
 /**
  * @brief Disable canonical mode, echo, signals and output processing in @p t.
  *
@@ -34,5 +39,18 @@ void terminal_enter_raw(int fd);
  * @param fd Terminal file descriptor passed to terminal_enter_raw().
  */
 void terminal_leave_raw(int fd);
+
+/**
+ * @brief Get the size of the terminal on @p fd.
+ *
+ * Each dimension falls back to TERMINAL_DEFAULT_ROWS / TERMINAL_DEFAULT_COLS
+ * if the size can't be read (for example @p fd is not a terminal) or is
+ * reported as 0, as a fresh pty does.
+ *
+ * @param fd   Terminal file descriptor, usually STDOUT_FILENO.
+ * @param rows Receives the number of rows; must not be NULL.
+ * @param cols Receives the number of columns; must not be NULL.
+ */
+void terminal_get_size(int fd, int *rows, int *cols);
 
 #endif
