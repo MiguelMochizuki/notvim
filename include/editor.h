@@ -1,12 +1,11 @@
 /**
  * @file editor.h
- * @brief Editor state, raw terminal mode and rendering.
+ * @brief Editor state, key handling and rendering.
  */
 #ifndef EDITOR_H
 #define EDITOR_H
 
 #include <stddef.h>
-#include <termios.h>
 
 /** Capacity of the editor buffer in bytes, including the terminating NUL. */
 #define EDITOR_BUFFER_SIZE 1024
@@ -16,40 +15,6 @@ typedef struct {
 	char buffer[EDITOR_BUFFER_SIZE]; /**< Buffer contents (not necessarily NUL-terminated). */
 	size_t len;                      /**< Number of bytes in use in @ref buffer. */
 } editor_t;
-
-/**
- * @brief Return the editor version.
- * @return Always 0 for now; placeholder.
- */
-int editor_version(void);
-
-/**
- * @brief Disable canonical mode, echo, signals and output processing in @p t.
- *
- * Exposed for testing only; not meant to be called outside editor.c.
- *
- * @param t Terminal attributes to modify in place. Unrelated flags are kept.
- */
-void editor_set_raw_flags(struct termios *t);
-
-/**
- * @brief Save the current terminal attributes of @p fd and switch it to raw mode.
- *
- * Does nothing if raw mode is already active or the terminal can't be read
- * or configured (for example when @p fd is not a tty).
- *
- * @param fd Terminal file descriptor, usually STDIN_FILENO.
- */
-void editor_enter_raw(int fd);
-
-/**
- * @brief Restore the terminal attributes saved by editor_enter_raw().
- *
- * Does nothing if raw mode is not active, so it is safe to call twice.
- *
- * @param fd Terminal file descriptor passed to editor_enter_raw().
- */
-void editor_leave_raw(int fd);
 
 /**
  * @brief Tell whether a key press should quit the editor.

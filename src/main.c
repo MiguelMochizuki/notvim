@@ -5,9 +5,10 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include "editor.h"
+#include "terminal.h"
 
 /** @brief atexit() handler that restores the terminal on STDIN_FILENO. */
-static void cleanup(void) { editor_leave_raw(STDIN_FILENO); }
+static void cleanup(void) { terminal_leave_raw(STDIN_FILENO); }
 
 /**
  * @brief Run the editor until Ctrl+Q is pressed or stdin closes.
@@ -17,7 +18,7 @@ int main(void) {
 	editor_t e;
 	editor_init(&e);
 
-	editor_enter_raw(STDIN_FILENO);
+	terminal_enter_raw(STDIN_FILENO);
 	atexit(cleanup);
 
 	/* Initial render */
