@@ -1,6 +1,6 @@
 /**
  * @file drawfmt.h
- * @brief The screen that editor_draw() must produce, spelled in one place for the tests.
+ * @brief The screen that editor_draw_text() must produce, spelled in one place for the tests.
  */
 #ifndef DRAWFMT_H
 #define DRAWFMT_H
@@ -8,7 +8,7 @@
 #include <stddef.h>
 
 /**
- * @brief Build the expected output of editor_draw() for rows of text.
+ * @brief Build the expected output of editor_draw_text() for rows of text.
  *
  * The format is hide cursor and home, the rows separated by "\r\n", each followed by
  * erase-to-end-of-line only if its display width is less than @p max_cols (after a

@@ -459,18 +459,18 @@ static void test_editor_load_resets_the_cursor(void) {
 	assert_cursor(0, 0);
 }
 
-/** @brief Assert that editor_draw() of the shared editor draws the rows @p text with the cursor at @p row, @p col (1-based), in a roomy buffer. */
+/** @brief Assert that editor_draw_text() of the shared editor draws the rows @p text with the cursor at @p row, @p col (1-based), in a roomy buffer. */
 static void assert_draw(size_t max_rows, const char *text, int row, int col) {
 	char out[1024], expected[1024];
 	draw_expected(expected, sizeof(expected), text, max_rows, ALL_COLS, row, col);
-	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, max_rows, ALL_COLS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw_text(&e, max_rows, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
 /** @brief Draw the shared editor into a roomy buffer with @p max_rows rows and @p max_cols columns and compare with the literal @p expected. */
 static void assert_draw_literal(size_t max_rows, size_t max_cols, const char *expected) {
 	char out[512];
-	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, max_rows, max_cols, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw_text(&e, max_rows, max_cols, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -561,7 +561,7 @@ static void test_editor_draw_never_clears_the_screen(void) {
 	append("a\x1b[2Jb");
 	append("\xc2\x9b[2Jc");
 	char out[256];
-	editor_draw(&e, 24, ALL_COLS, out, sizeof(out));
+	editor_draw_text(&e, 24, ALL_COLS, out, sizeof(out));
 	TEST_ASSERT_NULL(strstr(out, "\x1b[2J"));
 	TEST_ASSERT_NULL(strstr(out, "\xc2\x9b"));
 	TEST_ASSERT_NOT_NULL(strstr(out, "a^[[2Jb\x1b[K\r\n?[2Jc\x1b[K\x1b[3;1H\x1b[J"));
@@ -608,10 +608,10 @@ static void test_editor_draw_buffer_too_small_writes_nothing(void) {
 	editor_init(&e);
 	append("ab");
 	char out[EDITOR_DRAW_OVERHEAD] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, ALL_COLS, out, EDITOR_DRAW_OVERHEAD - 1));
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw_text(&e, 24, ALL_COLS, out, EDITOR_DRAW_OVERHEAD - 1));
 	TEST_ASSERT_EQUAL_STRING("", out);
 	char untouched[1] = { 'x' };
-	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, ALL_COLS, untouched, 0));
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw_text(&e, 24, ALL_COLS, untouched, 0));
 	TEST_ASSERT_EQUAL_INT('x', untouched[0]);
 }
 
@@ -620,7 +620,7 @@ static void test_editor_draw_drops_a_row_that_does_not_fit_but_keeps_the_tail(vo
 	editor_init(&e);
 	append("abcdef"); /* the row needs 6 + 3 bytes */
 	char out[EDITOR_DRAW_OVERHEAD + 8], expected[256];
-	size_t n = editor_draw(&e, 24, ALL_COLS, out, sizeof(out));
+	size_t n = editor_draw_text(&e, 24, ALL_COLS, out, sizeof(out));
 	draw_expected(expected, sizeof(expected), NULL, 24, ALL_COLS, 1, 1);
 	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
@@ -652,7 +652,7 @@ static void test_editor_draw_keeps_exactly_the_rows_that_fit_at_every_buffer_siz
 		while (k < 4 && bytes[k + 1] <= size - EDITOR_DRAW_OVERHEAD) k++;
 		char out[512], msg[96];
 		memset(out, 'x', sizeof(out));
-		size_t n = editor_draw(&e, 24, ALL_COLS, out, size);
+		size_t n = editor_draw_text(&e, 24, ALL_COLS, out, size);
 		snprintf(msg, sizeof(msg), "out_size %zu: expected exactly the first %zu rows", size, k);
 		TEST_ASSERT_TRUE_MESSAGE(n < size, "wrote past the buffer");
 		TEST_ASSERT_EQUAL_STRING_MESSAGE(wanted[k], out, msg);
@@ -667,7 +667,7 @@ static void test_editor_draw_worst_case_cursor_fits_in_the_overhead(void) {
 	e.cy = (size_t)-1 - 2; /* far below the text: the row is SIZE_MAX - 1 */
 	char out[EDITOR_DRAW_OVERHEAD];
 	memset(out, 'x', sizeof(out));
-	size_t n = editor_draw(&e, (size_t)-1, ALL_COLS, out, sizeof(out));
+	size_t n = editor_draw_text(&e, (size_t)-1, ALL_COLS, out, sizeof(out));
 	char expected[256];
 	snprintf(expected, sizeof(expected), "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[J" "\x1b[%zu;1H" "\x1b[?25h", (size_t)-1 - 1);
 	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
@@ -675,7 +675,7 @@ static void test_editor_draw_worst_case_cursor_fits_in_the_overhead(void) {
 	/* and the move to the first free row, with max_rows at its largest too, when a row is drawn */
 	char big[EDITOR_DRAW_OVERHEAD + 8];
 	e.cy = 0;
-	n = editor_draw(&e, (size_t)-1, ALL_COLS, big, sizeof(big));
+	n = editor_draw_text(&e, (size_t)-1, ALL_COLS, big, sizeof(big));
 	TEST_ASSERT_TRUE(n < sizeof(big));
 	TEST_ASSERT_EQUAL_STRING("\x1b[?25h", big + n - 6);
 }
@@ -835,7 +835,7 @@ static void test_editor_draw_clips_lines_and_clamps_the_cursor_column(void) {
 	e.cx = 5;
 	char out[512], expected[512];
 	draw_expected(expected, sizeof(expected), "abc", 24, 3, 1, 3);
-	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, 24, 3, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw_text(&e, 24, 3, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -1330,10 +1330,10 @@ static void move_n(editor_move_t dir, int n) {
 	for (int i = 0; i < n; i++) editor_move_cursor(&e, dir);
 }
 
-/** @brief Assert that the cursor column of editor_draw() with @p max_cols columns is @p col (1-based) on row 1. */
+/** @brief Assert that the cursor column of editor_draw_text() with @p max_cols columns is @p col (1-based) on row 1. */
 static void assert_draw_cursor_col(size_t max_cols, size_t col) {
 	char out[512], expected[32];
-	editor_draw(&e, 24, max_cols, out, sizeof(out));
+	editor_draw_text(&e, 24, max_cols, out, sizeof(out));
 	snprintf(expected, sizeof(expected), "\x1b[1;%zuH", col);
 	const size_t show = strlen("\x1b[?25h"); /* the cursor position is followed by the show-cursor sequence */
 	TEST_ASSERT_TRUE(strlen(out) >= strlen(expected) + show);
@@ -1496,7 +1496,7 @@ static void test_editor_draw_cursor_column_is_clamped_to_the_width_in_characters
 }
 
 /**
- * @brief editor_draw() keeps a whole screen of multi-byte text when the buffer has 4 bytes per column.
+ * @brief editor_draw_text() keeps a whole screen of multi-byte text when the buffer has 4 bytes per column.
  * @note It is the clipping that fails today, not the buffer: the end-to-end tests with 3 and 4-byte
  *       characters in test_notvim.c pin the size of the buffer that main() allocates.
  */
@@ -1512,7 +1512,7 @@ static void test_editor_draw_full_screen_of_multibyte_text_is_complete(void) {
 	}
 	draw_expected(expected, sizeof(expected), text, ROWS, COLS, 1, 1);
 	char out[ROWS * (COLS * 4 + 3 + 2) + EDITOR_DRAW_OVERHEAD]; /* the documented room: 4 bytes per column, ESC[K and CR LF per row */
-	size_t n = editor_draw(&e, ROWS, COLS, out, sizeof(out));
+	size_t n = editor_draw_text(&e, ROWS, COLS, out, sizeof(out));
 	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
@@ -2571,12 +2571,12 @@ static void test_editor_draw_screen_of_two_rows(void) {
 	                      "\x1b[2;1H\x1b[7m" "[No Name] NORMAL 1,1" "\x1b[m" "\x1b[1;1H\x1b[?25h");
 }
 
-/** @brief One row or none: no status line, the output of editor_draw(). */
+/** @brief One row or none: no status line, the output of editor_draw_text(). */
 static void test_editor_draw_screen_has_no_status_below_two_rows(void) {
 	editor_init(&e);
 	append("ab");
 	assert_screen_literal(1, 20, "\x1b[?25l\x1b[H" "ab\x1b[K" "\x1b[1;1H\x1b[?25h");
-	assert_screen_literal(0, 20, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[?25h"); /* as editor_draw() with no rows: nothing drawn, nothing erased */
+	assert_screen_literal(0, 20, "\x1b[?25l\x1b[H" "\x1b[1;1H\x1b[?25h"); /* as editor_draw_text() with no rows: nothing drawn, nothing erased */
 }
 
 /** @brief The status takes the whole width and has no ESC[K, at every width (the escape would erase its last character on a terminal that wraps late). */

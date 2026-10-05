@@ -45,7 +45,7 @@ typedef enum {
 void editor_scroll(editor_t *e, size_t rows);
 
 /**
- * Room editor_draw() needs on top of the rows: the 6-byte hide-cursor and the
+ * Room editor_draw_text() needs on top of the rows: the 6-byte hide-cursor and the
  * 3-byte home sequences, the move to the first free row ("ESC[<n>;1H", at most
  * 25 bytes) and the 3-byte erase-to-end-of-screen, an upper bound of 44 bytes
  * for the cursor position sequence, the 6-byte show-cursor sequence, and the
@@ -142,7 +142,7 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
 /**
  * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
  *
- * The pure text view of the rows. editor_draw() draws the screen with the same row writer, so this is
+ * The pure text view of the rows. editor_draw_text() draws the screen with the same row writer, so this is
  * what the tests and any tool that wants the text without escape sequences use.
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
@@ -266,6 +266,9 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
  * lines draws "ESC[?25l ESC[H ESC[1;1H ESC[J ESC[1;1H ESC[?25h". There is never
  * a clear-screen sequence ("ESC[2J").
  *
+ * Text window only (@p max_rows is the number of text rows): the program draws with editor_draw_screen(), which adds the
+ * status line; this one is the text part of it.
+ *
  * It does not scroll: call editor_scroll() first. No escape sequence or
  * character is ever cut: the tail is always complete, and a row that does not
  * fit whole in the room left (its text and its "ESC[K", and the "\r\n" before
@@ -286,19 +289,19 @@ size_t editor_status(const editor_t *e, size_t cols, char *out, size_t out_size)
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is
  *         smaller than EDITOR_DRAW_OVERHEAD.
  */
-size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size);
+size_t editor_draw_text(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size);
 
 /**
  * @brief Write a full redraw of a terminal of @p rows rows into @p out: the text window and the status line.
  *
- * Like editor_draw() with @c editor_text_rows(rows) text rows (same text, row ends, erase of the unused text rows,
+ * Like editor_draw_text() with @c editor_text_rows(rows) text rows (same text, row ends, erase of the unused text rows,
  * rules about never cutting an escape sequence), then, for @p rows of 2 or more, the status line of editor_status() on
  * the last row: the move "ESC[<rows>;1H", reverse video "ESC[7m", the @p max_cols columns of the status, "ESC[m". It
  * comes after the erase of the unused text rows ("ESC[<n+1>;1H ESC[J"), which would otherwise wipe it, and it has no
  * "ESC[K" because it takes the full width (a character in the last column leaves the cursor in pending wrap). Last
- * come the cursor position and "ESC[?25h", as in editor_draw(), but the row of the cursor never goes below the last text
+ * come the cursor position and "ESC[?25h", as in editor_draw_text(), but the row of the cursor never goes below the last text
  * row, so the cursor is never on the status line. With @p rows 0 or 1 there is no status line and the output is
- * that of editor_draw() with the same @p rows.
+ * that of editor_draw_text() with the same @p rows.
  *
  * Call editor_scroll() with editor_text_rows(@p rows) first. The status line is reserved before the rows: it is drawn
  * if its bytes (the move, ESC[7m, the status text, ESC[m) fit in @p out_size - EDITOR_DRAW_OVERHEAD, and the text rows
@@ -307,7 +310,7 @@ size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *ou
  *
  * @param e        Editor to draw; must not be NULL.
  * @param rows     Height of the terminal, status line included.
- * @param max_cols Width of the terminal; see editor_draw().
+ * @param max_cols Width of the terminal; see editor_draw_text().
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes; rows * (@p max_cols * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD
  *                 always holds the whole screen.

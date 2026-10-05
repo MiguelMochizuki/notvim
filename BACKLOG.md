@@ -228,7 +228,7 @@ Do these once insert mode and yank exist.
   - Design: the text is `<name> [dos] <mode>`, then `line,col` at the right (display column, not clipped); name through the same marks and UTF-8 rules as text; `[dos]` only for a CRLF file.
   - Decisions: the position wins when truncating, then the name and `[dos]` and the mode label are cut from the right; a cut never splits a character or a mark. Mode label comes from `editor_mode_label()`.
   - Decisions: `[dos]` follows the user decision of 2026-10-05: a CRLF file is kept as it is (detected, CR hidden, written back as CRLF); new and LF files stay LF; converting is `:set fileformat` (H10.6).
-  - Decisions: `editor_draw` (text only) stays beside `editor_draw_screen` (whole terminal); the status line is reserved before the rows when the buffer is short; one row has no status line.
+  - Decisions: `editor_draw_text` (text only) stays beside `editor_draw_screen` (whole terminal); the status line is reserved before the rows when the buffer is short; one row has no status line.
   - Known gaps: the name is cut on the right (Vim cuts it on the left); a name longer than the width hides the mode and `[dos]`; the cursor on a tab is drawn at its start (H6.4).
 
 ### H6 Robustness with real files and terminals

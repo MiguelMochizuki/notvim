@@ -257,7 +257,7 @@ int editor_load_file(editor_t *e, const char *path) {
 #define HIDE_HOME_LEN 9
 
 /**
- * @brief Draw @p max_rows text rows and, if @p status_row is not 0, the status line on that terminal row; see editor_draw() and editor_draw_screen().
+ * @brief Draw @p max_rows text rows and, if @p status_row is not 0, the status line on that terminal row; see editor_draw_text() and editor_draw_screen().
  *
  * The status line is reserved before the rows and left out whole if it does not fit; with a status line the cursor row never goes below the last text row.
  */
@@ -310,7 +310,7 @@ static size_t draw(const editor_t *e, size_t max_rows, size_t max_cols, size_t s
 	return pos;
 }
 
-size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
+size_t editor_draw_text(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
 	return draw(e, max_rows, max_cols, 0, out, out_size);
 }
 
