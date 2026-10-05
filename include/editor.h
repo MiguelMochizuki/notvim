@@ -7,9 +7,6 @@
 
 #include <stddef.h>
 
-/** Size in bytes of the buffer main() uses to render the screen. */
-#define EDITOR_BUFFER_SIZE 1024
-
 /** Editor state: the text as a growable array of lines. */
 typedef struct {
 	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
