@@ -623,6 +623,19 @@ static void test_ctrl_q_refused_in_insert_mode_after_typing(void) {
 	TEST_ASSERT_EQUAL_STRING("hi!", editor_line(&e, 0));
 }
 
+/** @brief Any key that is not the second Z or Q clears a pending Z, Ctrl+Q included: a refused Ctrl+Q must not leave "Z" half typed. */
+static void test_ctrl_q_clears_a_pending_z(void) {
+	open_q(1);
+	type("Z");
+	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	editor_handle_key(&e, 0x11);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	type("Z");
+	TEST_ASSERT_EQUAL_INT(0, e.quit); /* a lone Z waits again, it does not run :x */
+	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+}
+
 /** @brief Load and free clear a quit request and a pending Z. */
 static void test_quit_state_is_reset_by_free_and_load(void) {
 	open_q(0);
@@ -674,5 +687,6 @@ void test_writer_suite(void) {
 	RUN_TEST(test_z_is_a_plain_character_in_insert_and_command_mode);
 	RUN_TEST(test_ctrl_q_quits_unless_modified);
 	RUN_TEST(test_ctrl_q_refused_in_insert_mode_after_typing);
+	RUN_TEST(test_ctrl_q_clears_a_pending_z);
 	RUN_TEST(test_quit_state_is_reset_by_free_and_load);
 }

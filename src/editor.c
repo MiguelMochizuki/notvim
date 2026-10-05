@@ -528,13 +528,14 @@ static void leave_insert(editor_t *e) {
 /** @brief editor_handle_key() without the message: the message was cleared by the caller. */
 static int handle_key(editor_t *e, int key) {
 	editor_move_t dir;
+	int zpend = e->zpend; /* any key, Ctrl+Q included, ends a pending Z */
+	e->zpend = 0;
 	if (key == 0x11) {
 		if (e->mode == EDITOR_MODE_COMMAND) cmd_leave(e); /* a refusal shows in the message, which the command line would hide */
 		commands_run(e, "q");
 		return 1;
 	}
-	if (e->zpend) {
-		e->zpend = 0;
+	if (zpend) {
 		if (key == 'Z' || key == 'Q') {
 			commands_run(e, key == 'Z' ? "x" : "q!");
 			return 1;
