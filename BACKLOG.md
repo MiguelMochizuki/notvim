@@ -15,8 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.5** As user, I want notvim to refuse to start when stdin or stdout is not a terminal, so that it never writes escape sequences into a pipe or a file
-  - Reproduced: `./notvim file | cat` writes the alternate-screen and cursor sequences into the pipe.
+- **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
+  - Reproduced: after `SIGTERM` the switch back from the alternate screen is never written.
+  - The handler only sets a flag and the main loop does the cleanup, as in H0.7. A crash or `SIGKILL` stays out of reach.
 
 ## To do
 
@@ -25,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.6** As user, I want the terminal restored when notvim is stopped by `SIGTERM` or `SIGHUP`, so that I do not end up on the alternate screen in raw mode
-  - Reproduced: after `SIGTERM` the switch back from the alternate screen is never written.
-  - The handler only sets a flag and the main loop does the cleanup, as in H0.7. A crash or `SIGKILL` stays out of reach.
 - **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
   - Reproduced: after the terminal shrinks to 8 rows, notvim still draws 24.
   - The draw buffer must be reallocated for the new size.
@@ -198,3 +196,8 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - `cell_width` now takes the current column, so a tab goes to the next multiple of 8 and a two-column mark before it is counted. Clipping and the drawn cursor column use the same widths.
   - Decisions: a tab at the right edge is cut to the room left (spaces can be cut anywhere, a mark cannot). The cursor sits on the first column of a tab, not the last as Vim does in normal mode.
   - Known gaps: the tab stop is fixed at 8 (no `tabstop` setting), and nothing stops a later edit from needing the tab as a character (H3.2 types a tab as `\t`).
+- **H6.5** As user, I want notvim to refuse to start when stdin or stdout is not a terminal, so that it never writes escape sequences into a pipe or a file
+  - Reproduced: `./notvim file | cat` wrote the alternate-screen and cursor sequences into the pipe.
+  - `main` checks `isatty` on stdin, then stdout, before anything else: it prints `notvim: input is not a terminal` or `notvim: output is not a terminal` on stderr and exits 1. The messages are like Vim's.
+  - The tests start `notvim` with explicit descriptors (`/dev/null`, a pipe, a pty slave) and check the message, the exit status and that nothing at all reaches the redirected stdout.
+  - Known gap: stderr is not checked, so `notvim file 2>/dev/null` still starts; only the two streams the editor uses are.
