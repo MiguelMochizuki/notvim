@@ -2,6 +2,7 @@
  * @file test_terminal.c
  * @brief Unit and pty-based tests for terminal.c.
  */
+#include <poll.h>
 #include <sys/ioctl.h>
 #include <termios.h>
 #include <string.h>
@@ -197,6 +198,56 @@ static void test_terminal_get_size_falls_back_on_invalid_fd(void) {
 	assert_size(-1, TERMINAL_DEFAULT_ROWS, TERMINAL_DEFAULT_COLS);
 }
 
+/** @brief Read what is waiting on @p master until 100ms of silence; NUL-terminate; return the length. */
+static size_t read_pending(int master, char *buf, size_t size) {
+	size_t len = 0;
+	struct pollfd pfd = { .fd = master, .events = POLLIN };
+	while (len < size - 1 && poll(&pfd, 1, 100) > 0) {
+		ssize_t n = read(master, buf + len, size - 1 - len);
+		if (n <= 0) break;
+		len += (size_t)n;
+	}
+	buf[len] = '\0';
+	return len;
+}
+
+/** @brief Entering the alternate screen writes the switch sequence once, however often it is called. */
+static void test_terminal_enter_alt_screen_writes_once(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	char first[64], second[64];
+	terminal_enter_alt_screen(slave);
+	read_pending(master, first, sizeof(first));
+	terminal_enter_alt_screen(slave);
+	read_pending(master, second, sizeof(second));
+	terminal_leave_alt_screen(slave); /* leave the shared state clean before asserting */
+	close(master);
+	close(slave);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h", first);
+	TEST_ASSERT_EQUAL_STRING("", second);
+}
+
+/** @brief Leaving writes the switch-back sequence once, and only after entering. */
+static void test_terminal_leave_alt_screen_writes_once_after_enter(void) {
+	int master, slave;
+	TEST_ASSERT_EQUAL_INT(0, openpty(&master, &slave, NULL, NULL, NULL));
+	char before[64], entered[64], left[64], again[64];
+	terminal_leave_alt_screen(slave);
+	read_pending(master, before, sizeof(before));
+	terminal_enter_alt_screen(slave);
+	read_pending(master, entered, sizeof(entered));
+	terminal_leave_alt_screen(slave);
+	read_pending(master, left, sizeof(left));
+	terminal_leave_alt_screen(slave);
+	read_pending(master, again, sizeof(again));
+	close(master);
+	close(slave);
+	TEST_ASSERT_EQUAL_STRING("", before);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h", entered);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1049l", left);
+	TEST_ASSERT_EQUAL_STRING("", again);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_terminal_suite(void) {
 	RUN_TEST(test_terminal_sets_raw_flags);
@@ -210,4 +261,6 @@ void test_terminal_suite(void) {
 	RUN_TEST(test_terminal_get_size_falls_back_per_dimension);
 	RUN_TEST(test_terminal_get_size_falls_back_when_not_a_tty);
 	RUN_TEST(test_terminal_get_size_falls_back_on_invalid_fd);
+	RUN_TEST(test_terminal_enter_alt_screen_writes_once);
+	RUN_TEST(test_terminal_leave_alt_screen_writes_once_after_enter);
 }

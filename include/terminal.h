@@ -41,6 +41,26 @@ void terminal_enter_raw(int fd);
 void terminal_leave_raw(int fd);
 
 /**
+ * @brief Switch @p fd to the terminal's alternate screen buffer.
+ *
+ * The editor draws there, so the shell screen and its scrollback are left
+ * untouched until terminal_leave_alt_screen(). Does nothing if already active.
+ *
+ * @param fd Terminal file descriptor to write to, usually STDOUT_FILENO.
+ */
+void terminal_enter_alt_screen(int fd);
+
+/**
+ * @brief Switch back from the alternate screen buffer, restoring the shell screen.
+ *
+ * Does nothing if terminal_enter_alt_screen() was not called, so it is safe
+ * to call twice.
+ *
+ * @param fd Terminal file descriptor passed to terminal_enter_alt_screen().
+ */
+void terminal_leave_alt_screen(int fd);
+
+/**
  * @brief Get the size of the terminal on @p fd.
  *
  * Each dimension falls back to TERMINAL_DEFAULT_ROWS / TERMINAL_DEFAULT_COLS
