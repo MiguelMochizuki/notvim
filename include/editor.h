@@ -14,6 +14,7 @@ typedef struct {
 	size_t cap;   /**< Allocated capacity of @ref lines, in lines. */
 	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
 	size_t cx;    /**< Cursor column: byte index in that line. */
+	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
 } editor_t;
 
 /** Directions for editor_move_cursor(). */
@@ -23,6 +24,17 @@ typedef enum {
 	EDITOR_MOVE_LEFT,  /**< One column left. */
 	EDITOR_MOVE_RIGHT  /**< One column right. */
 } editor_move_t;
+
+/**
+ * @brief Scroll vertically so that the cursor line is inside the window.
+ *
+ * Changes only @c rowoff, by the least amount: up if the cursor is above the
+ * window, down if it is below it. Does nothing if @p rows is 0.
+ *
+ * @param e    Editor to modify; must not be NULL.
+ * @param rows Height of the window in lines, usually the terminal height.
+ */
+void editor_scroll(editor_t *e, size_t rows);
 
 /**
  * Room editor_draw() needs on top of the rendered text: the 7-byte clear and
@@ -39,7 +51,7 @@ typedef enum {
 int editor_should_exit(char c);
 
 /**
- * @brief Initialise @p e as an empty editor with no lines and the cursor at 0,0. Does not allocate.
+ * @brief Initialise @p e as an empty editor with no lines and the cursor at 0,0 with no scrolling. Does not allocate.
  * @param e Editor to initialise; must not be NULL and is not read first.
  */
 void editor_init(editor_t *e);
@@ -94,7 +106,7 @@ int editor_append_line(editor_t *e, const char *text);
 void editor_move_cursor(editor_t *e, editor_move_t dir);
 
 /**
- * @brief Render the first @p max_rows lines into @p out as a NUL-terminated string.
+ * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
  * turns off output processing. A blank line counts as a row. Output is
@@ -102,7 +114,8 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  *
  * @param e        Editor to render; must not be NULL.
  * @param max_rows Maximum number of lines to render, usually the terminal
- *                 height; 0 renders nothing.
+ *                 height; 0 renders nothing. The first line rendered is
+ *                 line @c rowoff; a @c rowoff past the last line renders nothing.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
@@ -128,10 +141,11 @@ int editor_load_file(editor_t *e, const char *path);
  * @brief Write a full screen redraw into @p out as a NUL-terminated string.
  *
  * The output clears the screen and moves home, then holds editor_render() of
- * the first @p max_rows lines, then moves the cursor to row cy+1, column
- * cx+1. The cursor sequence is always complete: if @p out_size is too small
+ * @p max_rows lines from @c rowoff, then moves the cursor to row
+ * cy-rowoff+1 (row 1 if the cursor is above the window), column cx+1. It
+ * does not scroll: call editor_scroll() first. The cursor sequence is always complete: if @p out_size is too small
  * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
- * written. A cursor below the visible rows keeps its real row and the
+ * written. A cursor below the window is reported at its real row and the
  * terminal clamps it.
  *
  * @param e        Editor to draw; must not be NULL.

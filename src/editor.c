@@ -19,6 +19,7 @@ void editor_init(editor_t *e) {
 	e->cap = 0;
 	e->cy = 0;
 	e->cx = 0;
+	e->rowoff = 0;
 }
 
 void editor_free(editor_t *e) {
@@ -63,6 +64,15 @@ static void put(char *out, size_t *pos, size_t max, const char *src, size_t len)
 	*pos += n;
 }
 
+void editor_scroll(editor_t *e, size_t rows) {
+	if (rows == 0) return;
+	if (e->cy < e->rowoff) {
+		e->rowoff = e->cy;
+	} else if (e->cy >= e->rowoff + rows) {
+		e->rowoff = e->cy - rows + 1;
+	}
+}
+
 /** @brief Last valid column on line @p y: its last character, or 0 for an empty line. */
 static size_t last_col(const editor_t *e, size_t y) {
 	size_t len = strlen(e->lines[y]);
@@ -92,9 +102,12 @@ size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_s
 	if (out_size == 0) return 0;
 	size_t max = out_size - 1; /* room for the NUL */
 	size_t pos = 0;
-	for (size_t i = 0; i < e->count && i < max_rows; i++) {
+	size_t avail = e->rowoff < e->count ? e->count - e->rowoff : 0;
+	if (avail > max_rows) avail = max_rows;
+	for (size_t i = 0; i < avail; i++) {
+		const char *line = e->lines[e->rowoff + i];
 		if (i > 0) put(out, &pos, max, "\r\n", 2);
-		put(out, &pos, max, e->lines[i], strlen(e->lines[i]));
+		put(out, &pos, max, line, strlen(line));
 	}
 	out[pos] = '\0';
 	return pos;
@@ -146,6 +159,7 @@ size_t editor_draw(const editor_t *e, size_t max_rows, char *out, size_t out_siz
 	memcpy(out, CLEAR_HOME, CLEAR_HOME_LEN);
 	size_t pos = CLEAR_HOME_LEN;
 	pos += editor_render(e, max_rows, out + pos, out_size - pos - CURSOR_SEQ_MAX);
-	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", e->cy + 1, e->cx + 1);
+	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
+	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", row + 1, e->cx + 1);
 	return pos;
 }

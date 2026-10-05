@@ -525,6 +525,126 @@ static void test_editor_draw_cuts_text_but_keeps_cursor_sequence(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
+/** @brief Append the lines "a", "b", ... (@p n of them) to the shared editor. */
+static void append_letters(int n) {
+	for (int i = 0; i < n; i++) {
+		char text[2] = { (char)('a' + i), '\0' };
+		append(text);
+	}
+}
+
+/** @brief A cursor inside the window does not scroll. */
+static void test_editor_scroll_keeps_offset_while_cursor_is_visible(void) {
+	editor_init(&e);
+	append_letters(5);
+	e.cy = 2;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(0, e.rowoff);
+}
+
+/** @brief A cursor just below the window scrolls down by one line. */
+static void test_editor_scroll_down_by_one(void) {
+	editor_init(&e);
+	append_letters(5);
+	e.cy = 3;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(1, e.rowoff);
+}
+
+/** @brief A cursor far below the window puts it on the last window row. */
+static void test_editor_scroll_down_far(void) {
+	editor_init(&e);
+	append_letters(10);
+	e.cy = 9;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(7, e.rowoff);
+}
+
+/** @brief A cursor above the window scrolls up so that it is on the first row. */
+static void test_editor_scroll_up(void) {
+	editor_init(&e);
+	append_letters(10);
+	e.rowoff = 5;
+	e.cy = 2;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(2, e.rowoff);
+}
+
+/** @brief A cursor on the last window row, and on the first one, does not scroll. */
+static void test_editor_scroll_window_edges_are_visible(void) {
+	editor_init(&e);
+	append_letters(10);
+	e.rowoff = 4;
+	e.cy = 6;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(4, e.rowoff);
+	e.cy = 4;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(4, e.rowoff);
+}
+
+/** @brief A window of 0 rows, and an editor without lines, never scroll. */
+static void test_editor_scroll_does_nothing_without_rows_or_lines(void) {
+	editor_init(&e);
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(0, e.rowoff);
+	append_letters(5);
+	e.cy = 4;
+	editor_scroll(&e, 0);
+	TEST_ASSERT_EQUAL_UINT(0, e.rowoff);
+}
+
+/** @brief Loading a file puts the scroll offset back at 0. */
+static void test_editor_load_resets_the_scroll_offset(void) {
+	editor_init(&e);
+	append_letters(10);
+	e.cy = 9;
+	editor_scroll(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(7, e.rowoff);
+	const char *path = tmpdir_write("scroll.txt", "x\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, e.rowoff);
+}
+
+/** @brief Rendering starts at the first visible line. */
+static void test_editor_render_starts_at_the_scroll_offset(void) {
+	editor_init(&e);
+	append_letters(5);
+	e.rowoff = 2;
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("c\r\nd", out);
+}
+
+/** @brief A scroll offset past the last line renders nothing. */
+static void test_editor_render_offset_past_the_end_is_empty(void) {
+	editor_init(&e);
+	append_letters(3);
+	e.rowoff = 10;
+	char out[256] = "garbage";
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 5, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("", out);
+}
+
+/** @brief The drawn cursor row is relative to the first visible line. */
+static void test_editor_draw_cursor_row_is_relative_to_the_offset(void) {
+	editor_init(&e);
+	append_letters(5);
+	e.rowoff = 2;
+	e.cy = 3;
+	assert_draw(2, CLEAR_HOME "c\r\nd" "\x1b[2;1H");
+}
+
+/** @brief A cursor above the window is drawn on row 1 instead of wrapping around. */
+static void test_editor_draw_cursor_above_the_window_is_row_one(void) {
+	editor_init(&e);
+	append_letters(5);
+	e.rowoff = 3;
+	e.cy = 1;
+	assert_draw(2, CLEAR_HOME "d\r\ne" "\x1b[1;1H");
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -573,4 +693,15 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_draw_cursor_below_visible_rows);
 	RUN_TEST(test_editor_draw_buffer_too_small_writes_nothing);
 	RUN_TEST(test_editor_draw_cuts_text_but_keeps_cursor_sequence);
+	RUN_TEST(test_editor_scroll_keeps_offset_while_cursor_is_visible);
+	RUN_TEST(test_editor_scroll_down_by_one);
+	RUN_TEST(test_editor_scroll_down_far);
+	RUN_TEST(test_editor_scroll_up);
+	RUN_TEST(test_editor_scroll_window_edges_are_visible);
+	RUN_TEST(test_editor_scroll_does_nothing_without_rows_or_lines);
+	RUN_TEST(test_editor_load_resets_the_scroll_offset);
+	RUN_TEST(test_editor_render_starts_at_the_scroll_offset);
+	RUN_TEST(test_editor_render_offset_past_the_end_is_empty);
+	RUN_TEST(test_editor_draw_cursor_row_is_relative_to_the_offset);
+	RUN_TEST(test_editor_draw_cursor_above_the_window_is_row_one);
 }
