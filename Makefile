@@ -4,10 +4,11 @@
 # 	- make test: compiels and runs test suite; returns 0 if success and != 0 if fails
 # 	- make clean: removes binary and object files
 # 	- Builds use AddressSanitizer + UBSan (memory errors and leaks fail the run).
-# 	  Disable with `make clean && make SAN=` (needed for Valgrind, which can't run with ASan).
+# 	  Disable with `make clean && make SAN=`; run `make clean` after changing SAN.
+# 	- Objects are rebuilt when an included header changes (-MMD).
 CC 			= gcc
 SAN 		?= -fsanitize=address,undefined -fno-omit-frame-pointer
-CFLAGS 		= -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -Itests/unity $(SAN)
+CFLAGS 		= -Wall -Wextra -Werror -pedantic -std=c11 -Iinclude -Itests/unity -MMD -MP $(SAN)
 
 SRCS 		= $(wildcard src/*.c)
 OBJS 		= $(SRCS:.c=.o)
@@ -38,5 +39,9 @@ test_runner: $(OBJS_LIB) $(TEST_OBJS) $(UNITY_OBJS)
 clean:
 	rm -f notvim test_runner
 	rm -f $(OBJS) $(TEST_OBJS) $(UNITY_OBJS)
+	rm -f $(OBJS:.o=.d) $(TEST_OBJS:.o=.d) $(UNITY_OBJS:.o=.d)
+
+# Rebuild objects when a header they include changes (.d files written by -MMD)
+-include $(OBJS:.o=.d) $(TEST_OBJS:.o=.d) $(UNITY_OBJS:.o=.d)
 
 .PHONY: all test clean
