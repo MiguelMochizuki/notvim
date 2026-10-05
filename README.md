@@ -27,7 +27,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| In progress | UTF-8 text shown and navigated by character |
+| In progress | CRLF files shown without a stray `^M` |
 | Robustness | The limitations below, in order of harm (epic H6) |
 | Editing | Insert mode, typing characters, `Backspace` and `Enter` |
 | Navigation | Scrolling long lines horizontally |
@@ -38,7 +38,9 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 These are being fixed before new features (see epic H6 in [BACKLOG.md](BACKLOG.md)). Until then:
 
-- Files with accents or other non-ASCII text, or CRLF line endings, are not displayed correctly (a CRLF file shows `^M` at the end of each line).
+- CRLF line endings are not handled (a CRLF file shows `^M` at the end of each line).
+- Double-width (CJK) and combining characters take one column each. Invalid UTF-8 and C1 controls are shown as `?`.
+- The cursor column is a byte index, so it can drift left when you move through lines with accents (see H6.10).
 
 ## Build
 
