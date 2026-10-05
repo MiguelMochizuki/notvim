@@ -12,6 +12,9 @@
 #include "editor.h"
 #include "tmpdir.h"
 
+/** A row limit larger than any test editor, for tests that are not about the limit. */
+#define ALL_ROWS 1000
+
 /** @brief Ctrl+Q makes editor_should_exit() return 1. */
 static void test_editor_should_exit_on_ctrl_q(void) {
 	TEST_ASSERT_EQUAL_INT(1, editor_should_exit(0x11));
@@ -152,7 +155,7 @@ static void test_editor_render_no_lines(void) {
 	editor_t e;
 	editor_init(&e);
 	char out[256] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("", out);
 	editor_free(&e);
 }
@@ -163,7 +166,7 @@ static void test_editor_render_one_line(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
 	editor_free(&e);
 }
@@ -176,8 +179,59 @@ static void test_editor_render_joins_lines_with_crlf(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(6, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(6, editor_render(&e, ALL_ROWS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("a\r\n\r\nb", out);
+	editor_free(&e);
+}
+
+/** @brief Only the first max_rows lines are rendered, with no trailing separator. */
+static void test_editor_render_limits_rows(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "c"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "d"));
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("a\r\nb", out);
+	editor_free(&e);
+}
+
+/** @brief max_rows equal to the line count renders every line. */
+static void test_editor_render_rows_equal_to_line_count(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "c"));
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(7, editor_render(&e, 3, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("a\r\nb\r\nc", out);
+	editor_free(&e);
+}
+
+/** @brief max_rows of 0 renders an empty string. */
+static void test_editor_render_zero_rows(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	char out[256] = "garbage";
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 0, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("", out);
+	editor_free(&e);
+}
+
+/** @brief A blank line inside the limit takes a row, leaving a trailing separator. */
+static void test_editor_render_blank_line_counts_as_a_row(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("a\r\n", out);
 	editor_free(&e);
 }
 
@@ -187,7 +241,7 @@ static void test_editor_render_truncates_on_small_buffer(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abcdef"));
 	char out[4]; /* 3 chars + '\0' */
-	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
 	editor_free(&e);
 }
@@ -199,7 +253,7 @@ static void test_editor_render_truncates_across_lines(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "ab"));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "cd"));
 	char out[5]; /* "ab\r\n" would need 4 chars + '\0'; "cd" is cut off */
-	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, ALL_ROWS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("ab\r\n", out);
 	editor_free(&e);
 }
@@ -210,7 +264,7 @@ static void test_editor_render_zero_size_returns_zero(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[1] = { 'x' };
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, out, 0));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, out, 0));
 	TEST_ASSERT_EQUAL_INT('x', out[0]); /* out must not be touched */
 	editor_free(&e);
 }
@@ -346,6 +400,10 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_no_lines);
 	RUN_TEST(test_editor_render_one_line);
 	RUN_TEST(test_editor_render_joins_lines_with_crlf);
+	RUN_TEST(test_editor_render_limits_rows);
+	RUN_TEST(test_editor_render_rows_equal_to_line_count);
+	RUN_TEST(test_editor_render_zero_rows);
+	RUN_TEST(test_editor_render_blank_line_counts_as_a_row);
 	RUN_TEST(test_editor_render_truncates_on_small_buffer);
 	RUN_TEST(test_editor_render_truncates_across_lines);
 	RUN_TEST(test_editor_render_zero_size_returns_zero);

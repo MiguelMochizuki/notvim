@@ -61,11 +61,11 @@ static void put(char *out, size_t *pos, size_t max, const char *src, size_t len)
 	*pos += n;
 }
 
-size_t editor_render(const editor_t *e, char *out, size_t out_size) {
+size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_size) {
 	if (out_size == 0) return 0;
 	size_t max = out_size - 1; /* room for the NUL */
 	size_t pos = 0;
-	for (size_t i = 0; i < e->count; i++) {
+	for (size_t i = 0; i < e->count && i < max_rows; i++) {
 		if (i > 0) put(out, &pos, max, "\r\n", 2);
 		put(out, &pos, max, e->lines[i], strlen(e->lines[i]));
 	}

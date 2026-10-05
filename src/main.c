@@ -22,8 +22,10 @@ int main(void) {
 	atexit(cleanup);
 
 	/* Initial render */
+	int rows, cols;
+	terminal_get_size(STDOUT_FILENO, &rows, &cols);
 	char out[EDITOR_BUFFER_SIZE];
-	size_t n = editor_render(&e, out, sizeof(out));
+	size_t n = editor_render(&e, (size_t)rows, out, sizeof(out));
 	write(STDOUT_FILENO, out, n);
 
 	/* Main loop */

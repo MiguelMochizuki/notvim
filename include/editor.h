@@ -65,18 +65,20 @@ const char *editor_line(const editor_t *e, size_t i);
 int editor_append_line(editor_t *e, const char *text);
 
 /**
- * @brief Render all lines into @p out as a NUL-terminated string.
+ * @brief Render the first @p max_rows lines into @p out as a NUL-terminated string.
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
- * turns off output processing. Output is truncated to fit @p out_size,
- * leaving room for the NUL.
+ * turns off output processing. A blank line counts as a row. Output is
+ * truncated to fit @p out_size, leaving room for the NUL.
  *
  * @param e        Editor to render; must not be NULL.
+ * @param max_rows Maximum number of lines to render, usually the terminal
+ *                 height; 0 renders nothing.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
  */
-size_t editor_render(const editor_t *e, char *out, size_t out_size);
+size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_size);
 
 /**
  * @brief Load the file at @p path into @p e, replacing its contents.
