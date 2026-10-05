@@ -104,11 +104,16 @@ static int wait_until_raw(int master) {
 	return 0;
 }
 
-/** @brief Read what the child writes until 300ms of silence or EOF; NUL-terminate; return the length. */
+/**
+ * @brief Read what the child writes; NUL-terminate; return the length.
+ *
+ * Waits up to 300 ms for the first byte (so "nothing is drawn" is still checked), then stops at 100 ms of silence or EOF:
+ * a draw arrives within one burst, so there is no need to wait the full 300 ms after it.
+ */
 static size_t read_output(int master, char *buf, size_t size) {
 	size_t len = 0;
 	struct pollfd pfd = { .fd = master, .events = POLLIN };
-	while (len < size - 1 && poll(&pfd, 1, 300) > 0) {
+	while (len < size - 1 && poll(&pfd, 1, len ? 100 : 300) > 0) {
 		ssize_t n = read(master, buf + len, size - 1 - len);
 		if (n <= 0) break;
 		len += (size_t)n;
