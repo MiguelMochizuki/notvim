@@ -27,9 +27,10 @@ Keys:
 | `Backspace` | In insert mode: delete the character before the cursor; at the start of a line, join it to the previous one |
 | `Delete` | In insert mode: delete the character under the cursor; at the end of a line, join the next one |
 | `Esc` | Leave insert mode, one character left unless at column 0 |
+| `:` | Open the command line on the bottom row: type, `Backspace` deletes (cancels when empty), `Esc` cancels, `Enter` runs. No command works yet: each shows `E492` |
 | `Ctrl+Q` | Quit |
 
-The last row is the status line: `name [dos] [+] NORMAL` on the left, `line,col` (display column) on the right. On a narrow terminal the position stays and the rest is cut from the right (mode first).
+The last row is the status line, or the command line, or a message such as an error (until the next key): `name [dos] [+] NORMAL` on the left, `line,col` (display column) on the right. On a narrow terminal the position stays and the rest is cut from the right (mode first).
 
 ## Roadmap
 
@@ -38,12 +39,12 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 | Next | Stories |
 |------|---------|
 | Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete` |
-| In progress | saving with `:w` |
+| In progress | saving with `:w` (the `:` command line is built, the commands are not yet) |
 | Editing core | quitting with `:q` and `:q!` |
 | Navigation | Scrolling long lines horizontally; double-width characters |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
-| Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, `:wq` |
+| Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, `:wq`, command-line history and editing |
 | Mouse and clipboard | Wheel scrolling that keeps native selection, yanking to the system clipboard, bracketed paste |
 
 ## Known limitations
