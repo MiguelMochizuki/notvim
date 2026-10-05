@@ -10,8 +10,9 @@ Early development. Currently supports:
 - Raw mode input (no echo, no line buffering)
 - Exit with `Ctrl+Q`
 - Opening a file given on the command line and showing its lines, up to the terminal height (read-only)
+- Moving the cursor with the arrow keys
 
-Not yet implemented: navigation, scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
+Not yet implemented: `h j k l`, scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
 ## Build
 
@@ -34,14 +35,16 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail
 
 With a file, its first lines (as many as fit the terminal) are shown; a missing
 file starts an empty buffer, and a file that cannot be read prints an error and
-exits with status 1. The editor then waits for `Ctrl+Q`.
+exits with status 1. The arrow keys move the cursor (it never wraps or leaves
+the text), and `Ctrl+Q` quits.
 More will come as histories land.
 
 ## Layout
 
-- `src/main.c`: entry point (argument, raw mode, first render, wait for `Ctrl+Q`).
+- `src/main.c`: entry point (argument, raw mode, input loop, redraw after each move).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
-  loading a file, rendering up to a number of rows.
+  the cursor, loading a file, rendering and drawing up to a number of rows.
+- `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows).
 - `src/terminal.c`, `include/terminal.h`: raw mode and terminal size.
 - `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
   the built `./notvim` on a pty, and `tmpdir.c`, a per-test temporary directory.
