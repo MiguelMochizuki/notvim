@@ -19,18 +19,6 @@
 /** A width larger than any test line, for tests that are not about clipping. */
 #define ALL_COLS ((size_t)-1)
 
-/** @brief Ctrl+Q makes editor_should_exit() return 1. */
-static void test_editor_should_exit_on_ctrl_q(void) {
-	TEST_ASSERT_EQUAL_INT(1, editor_should_exit(0x11));
-}
-
-/** @brief Other keys, including Ctrl+C, do not exit. */
-static void test_editor_should_not_exit_on_other_keys(void) {
-	TEST_ASSERT_EQUAL_INT(0, editor_should_exit('a'));
-	TEST_ASSERT_EQUAL_INT(0, editor_should_exit(0x03));  /* Ctrl+C */
-	TEST_ASSERT_EQUAL_INT(0, editor_should_exit('q'));
-}
-
 /** Editor shared by the tests of this file; freed in test_editor_teardown(), even after a failed assertion. */
 static editor_t e;
 
@@ -3715,9 +3703,9 @@ static void test_editor_enter_on_an_empty_command_does_nothing(void) {
 	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
 }
 
-/** @brief Every non-empty command that is not :w shows E492 with the text as typed, and the mode goes back to normal. */
+/** @brief Every non-empty command that is not known shows E492 with the text as typed, and the mode goes back to normal. */
 static void test_editor_every_other_command_shows_e492_for_now(void) {
-	const char *cmds[] = { "x", "q", "q!", "wq", "zz", "writ" };
+	const char *cmds[] = { "zz", "writ", "qq", "wqa", "xx", "foo!" };
 	for (size_t i = 0; i < sizeof(cmds) / sizeof(*cmds); i++) {
 		editor_init(&e);
 		append("t");
@@ -3899,8 +3887,6 @@ static void test_editor_draw_screen_command_row_fits_the_documented_buffer(void)
 }
 
 void test_editor_suite(void) {
-	RUN_TEST(test_editor_should_exit_on_ctrl_q);
-	RUN_TEST(test_editor_should_not_exit_on_other_keys);
 	RUN_TEST(test_editor_init_is_empty);
 	RUN_TEST(test_editor_append_one_line);
 	RUN_TEST(test_editor_append_keeps_order);

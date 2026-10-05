@@ -34,6 +34,9 @@ typedef struct {
 	                   "[+]" while it is set. */
 	cmdline_t cmd; /**< The command line being typed in @ref EDITOR_MODE_COMMAND; emptied when that mode starts and ends. */
 	char *msg;     /**< Owned message, or NULL: shown on the bottom row instead of the status line until the next key (see editor_set_message()). */
+	int quit;      /**< Non-zero once a quit was asked for (":q", ":wq", ":x", "ZZ", "ZQ", Ctrl+Q) and allowed; the caller then ends its input loop
+	                    and exits with status 0. 0 after init, free and load; a refused quit leaves it 0. */
+	int zpend;     /**< Non-zero between a "Z" typed in normal mode and the next key, which makes "ZZ" or "ZQ" or is handled as usual; 0 after init, free and load. */
 	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode that is still incomplete; see @ref pend_len. */
 	size_t pend_len; /**< Number of bytes in @ref pend; 0 when no character is half typed. Reset by any key that is not a
 	                      continuation byte, and by leaving insert mode. */
@@ -81,13 +84,6 @@ void editor_scroll(editor_t *e, size_t rows);
  * EDITOR_STATUS_OVERHEAD bytes always holds a whole screen of @c rows rows with its status row.
  */
 #define EDITOR_STATUS_OVERHEAD 32
-
-/**
- * @brief Tell whether a key press should quit the editor.
- * @param c Byte read from the terminal.
- * @return Non-zero if @p c is Ctrl+Q (0x11), 0 otherwise.
- */
-int editor_should_exit(char c);
 
 /**
  * @brief Initialise @p e as an empty editor with no lines and the cursor at 0,0 with no scrolling. Does not allocate.
@@ -186,13 +182,18 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
  * at the end of the line if @c wantcol is at or past the end of it (an empty line: 0).
  *
+ * Quitting: in normal mode "Z" sets @c zpend and returns 0; the next key then clears it and, if it is 'Z' or 'Q', runs
+ * ":x" or ":q!" (see commands_run()); any other key is handled as if "Z" had not been typed. In insert and command mode
+ * 'Z' is a plain character. Ctrl+Q (byte 0x11, in every mode) asks to quit like ":q": it sets @c quit, or, when
+ * @c modified is set, shows "E37: No write since last change (add ! to override)" and the editor goes on.
+ *
  * In normal mode ':' opens the command line (@ref EDITOR_MODE_COMMAND; in insert mode ':' is typed as a colon). In
  * command mode a printable ASCII byte or a whole UTF-8 character is appended to @c cmd (the bytes of a character
  * arrive as consecutive keys, as in insert mode; at CMDLINE_MAX bytes more are dropped); Backspace deletes the last
  * character and on an EMPTY command line cancels, as Vim does; KEY_ESC cancels; Enter runs the command and returns to
  * normal mode. Cancel and run empty the command line and leave the cursor where it was. Every other key is ignored.
  * Running: an empty command (only spaces and colons) does nothing; any other, known or not, sets the message
- * "E492: Not an editor command: <text>" for now (:w, :q, :wq and :x have no behaviour yet). Every call first clears the
+ * "E492: Not an editor command: <text>" unless commands_run() knows it. Every call first clears the
  * message, and then returns non-zero if there was one, so the screen is redrawn without it.
  *
  * @param e   Editor to modify; must not be NULL.

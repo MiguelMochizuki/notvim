@@ -12,16 +12,14 @@
 #include "keys.h"
 #include "utf8.h"
 
-int editor_should_exit(char c) {
-	return c == 0x11; /* Ctrl+Q = DC1 */
-}
-
 void editor_init(editor_t *e) {
 	e->lines = NULL;
 	e->count = 0;
 	e->cap = 0;
 	e->crlf = 0;
 	e->modified = 0;
+	e->quit = 0;
+	e->zpend = 0;
 	e->pend_len = 0;
 	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
@@ -530,6 +528,18 @@ static void leave_insert(editor_t *e) {
 /** @brief editor_handle_key() without the message: the message was cleared by the caller. */
 static int handle_key(editor_t *e, int key) {
 	editor_move_t dir;
+	if (key == 0x11) {
+		if (e->mode == EDITOR_MODE_COMMAND) cmd_leave(e); /* a refusal shows in the message, which the command line would hide */
+		commands_run(e, "q");
+		return 1;
+	}
+	if (e->zpend) {
+		e->zpend = 0;
+		if (key == 'Z' || key == 'Q') {
+			commands_run(e, key == 'Z' ? "x" : "q!");
+			return 1;
+		}
+	}
 	if (e->mode == EDITOR_MODE_COMMAND && key == KEY_ESC) {
 		cmd_leave(e);
 		return 1;
@@ -551,6 +561,9 @@ static int handle_key(editor_t *e, int key) {
 	case 'i':
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;
+	case 'Z':
+		e->zpend = 1;
+		return 0;
 	case ':':
 		e->mode = EDITOR_MODE_COMMAND;
 		cmdline_clear(&e->cmd);

@@ -55,7 +55,7 @@ static int screen_draw(const screen_t *s, const editor_t *e) {
 }
 
 /**
- * @brief Run the editor until Ctrl+Q is pressed or stdin closes.
+ * @brief Run the editor until it is asked to quit (\c editor_t::quit: ":q", ":wq", ":x", "ZZ", "ZQ", Ctrl+Q) or stdin closes.
  *
  * Usage: notvim [file]. It refuses to run unless stdin and stdout are
  * terminals, so that it never writes escape sequences into a pipe or a file.
@@ -158,8 +158,8 @@ int main(int argc, char **argv) {
 			key = key_parser_feed(&parser, (unsigned char)c);
 		}
 		if (key == KEY_NONE) continue;
-		if (key < 256 && editor_should_exit((char)key)) break;
 		if (editor_handle_key(&e, key)) {
+			if (e.quit) break; /* ":q", ":wq", ":x", "ZZ", "ZQ" or Ctrl+Q: leave through the normal exit, status 0 */
 			editor_scroll(&e, editor_text_rows((size_t)screen.rows));
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;

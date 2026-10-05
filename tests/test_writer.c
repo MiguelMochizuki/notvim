@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -416,6 +417,224 @@ static void test_command_w_message_goes_with_the_next_key(void) {
 }
 
 /** @brief Run the writer and ':w' tests. */
+/** The refusal Vim gives for a quit with unsaved changes. */
+#define E37 "E37: No write since last change (add ! to override)"
+
+/** @brief Start the shared editor on a saved file "q.txt" holding "ab\n", with @c modified set if @p modified. */
+static void open_q(int modified) {
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("q.txt", "ab\n")));
+	if (modified) type("ix\x1b");
+	TEST_ASSERT_EQUAL_INT(modified, e.modified);
+}
+
+/** @brief ":q" quits an unmodified buffer and is refused with E37 on a modified one (which stays modified and unsaved). */
+static void test_command_q_quits_only_when_unmodified(void) {
+	open_q(0);
+	type(":q\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	open_q(1);
+	type(":q\r");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg(E37);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+	assert_file(e.path, "ab\n", 3);
+}
+
+/** @brief A modified buffer without a name is refused too. */
+static void test_command_q_refuses_an_unnamed_modified_buffer(void) {
+	editor_free(&e);
+	type("ihi\x1b:q\r");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg(E37);
+}
+
+/** @brief ":q!" quits a modified buffer without writing it. */
+static void test_command_q_bang_quits_without_saving(void) {
+	open_q(1);
+	type(":q!\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(e.path, "ab\n", 3);
+	TEST_ASSERT_EQUAL_INT(1, e.modified);
+	open_q(0);
+	type(":q!\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+}
+
+/** @brief ":wq" (and ":wq!") writes the buffer and quits, modified or not. */
+static void test_command_wq_writes_and_quits(void) {
+	const char *cmds[] = { ":wq\r", ":wq!\r" };
+	for (int i = 0; i < 2; i++) {
+		open_q(1);
+		type(cmds[i]);
+		TEST_ASSERT_EQUAL_INT(1, e.quit);
+		assert_file(e.path, "xab\n", 4);
+		TEST_ASSERT_EQUAL_INT(0, e.modified);
+	}
+	open_q(0);
+	type(":wq\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+}
+
+/** @brief ":wq name" writes to that name and quits, as Vim does. */
+static void test_command_wq_with_a_name_writes_there_and_quits(void) {
+	char path[256], cmd[300];
+	snprintf(path, sizeof(path), "%s", tmpdir_path("other.txt"));
+	open_q(1);
+	snprintf(cmd, sizeof(cmd), ":wq %s\r", path);
+	type(cmd);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(path, "xab\n", 4);
+}
+
+/** @brief A failing write in ":wq" and ":x" shows the error and does not quit; so does a missing name (E32). */
+static void test_command_wq_and_x_do_not_quit_when_the_write_fails(void) {
+	const char *cmds[] = { ":wq\r", ":x\r", ":wq!\r", ":x!\r" };
+	for (int i = 0; i < 4; i++) {
+		open_q(1);
+		free(e.path);
+		e.path = strdup(tmpdir_path("nodir/q.txt"));
+		type(cmds[i]);
+		TEST_ASSERT_EQUAL_INT(0, e.quit);
+		TEST_ASSERT_EQUAL_INT(1, e.modified);
+		TEST_ASSERT_NOT_NULL(strstr(e.msg, "No such file or directory"));
+	}
+	editor_free(&e);
+	type("ihi\x1b:wq\r");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg("E32: No file name");
+	type(":x\r");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg("E32: No file name");
+}
+
+/** @brief ":x" writes a modified buffer and quits; an unmodified one is not written (its file is left alone) but quits. */
+static void test_command_x_writes_only_when_modified(void) {
+	open_q(1);
+	type(":x\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(e.path, "xab\n", 4);
+	open_q(0);
+	TEST_ASSERT_EQUAL_INT(0, unlink(e.path)); /* a write would bring it back */
+	type(":x\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	TEST_ASSERT_NOT_EQUAL(0, access(e.path, F_OK));
+	editor_free(&e); /* unnamed and unmodified: nothing to write, so no E32 */
+	type(":x\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+}
+
+/** @brief "ZZ" is ":x": it writes a modified buffer and quits; an unmodified one is left alone. */
+static void test_normal_zz_is_x(void) {
+	open_q(1);
+	type("ZZ");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(e.path, "xab\n", 4);
+	open_q(0);
+	unlink(e.path);
+	type("ZZ");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	TEST_ASSERT_NOT_EQUAL(0, access(e.path, F_OK));
+	open_q(1);
+	free(e.path);
+	e.path = strdup(tmpdir_path("nodir/q.txt"));
+	type("ZZ");
+	TEST_ASSERT_EQUAL_INT(0, e.quit); /* a failed write does not quit */
+	TEST_ASSERT_NOT_NULL(strstr(e.msg, "No such file or directory"));
+}
+
+/** @brief "ZQ" is ":q!": it quits a modified buffer without writing it. */
+static void test_normal_zq_is_q_bang(void) {
+	open_q(1);
+	type("ZQ");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	assert_file(e.path, "ab\n", 3);
+}
+
+/** @brief A "Z" waits for the next key: it asks for no redraw, another key cancels it and is handled as usual, Z then Z again is not stuck. */
+static void test_normal_z_pending_state(void) {
+	open_q(1);
+	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 'Z'));
+	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	TEST_ASSERT_EQUAL_INT(1, editor_handle_key(&e, 'l')); /* moves, as Vim's "Zl" does */
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	type("Zi"); /* the second key still acts: insert mode */
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	type("\x1b");
+	type("Z\x1b"); /* Esc cancels */
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	type("Zz"); /* an unknown key cancels too: a later "Z" is not completed by it */
+	type("Z");
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	type("q"); /* "Zq" is not a command: lower case */
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	type("Z:"); /* the colon opens the command line */
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+}
+
+/** @brief In insert mode and on the command line Z is typed, and nothing quits. */
+static void test_z_is_a_plain_character_in_insert_and_command_mode(void) {
+	editor_free(&e);
+	type("iZZQ");
+	TEST_ASSERT_EQUAL_STRING("ZZQ", editor_line(&e, 0));
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	type("\x1b:ZQ");
+	TEST_ASSERT_EQUAL_STRING("ZQ", e.cmd.text);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+}
+
+/** @brief Ctrl+Q quits an unmodified buffer in every mode and is refused with E37 when modified; the editor goes on. */
+static void test_ctrl_q_quits_unless_modified(void) {
+	open_q(0);
+	editor_handle_key(&e, 0x11);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	open_q(0);
+	type("i");
+	editor_handle_key(&e, 0x11);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	open_q(0);
+	type(":");
+	editor_handle_key(&e, 0x11);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	open_q(1);
+	TEST_ASSERT_NOT_EQUAL(0, editor_handle_key(&e, 0x11));
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg(E37);
+	type(":q!\r");
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+}
+
+/** @brief Ctrl+Q in insert mode on a buffer just typed in is refused too, and the next key brings back the status line. */
+static void test_ctrl_q_refused_in_insert_mode_after_typing(void) {
+	editor_free(&e);
+	type("ihi");
+	editor_handle_key(&e, 0x11);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	assert_msg(E37);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
+	type("!");
+	TEST_ASSERT_NULL(e.msg);
+	TEST_ASSERT_EQUAL_STRING("hi!", editor_line(&e, 0));
+}
+
+/** @brief Load and free clear a quit request and a pending Z. */
+static void test_quit_state_is_reset_by_free_and_load(void) {
+	open_q(0);
+	type(":q\r");
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	editor_free(&e);
+	type("Z");
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+}
+
 void test_writer_suite(void) {
 	RUN_TEST(test_writer_writes_lines_with_lf);
 	RUN_TEST(test_writer_new_file_has_no_cr);
@@ -442,4 +661,18 @@ void test_writer_suite(void) {
 	RUN_TEST(test_command_w_empty_editor);
 	RUN_TEST(test_command_w_error_shows_strerror);
 	RUN_TEST(test_command_w_message_goes_with_the_next_key);
+	RUN_TEST(test_command_q_quits_only_when_unmodified);
+	RUN_TEST(test_command_q_refuses_an_unnamed_modified_buffer);
+	RUN_TEST(test_command_q_bang_quits_without_saving);
+	RUN_TEST(test_command_wq_writes_and_quits);
+	RUN_TEST(test_command_wq_with_a_name_writes_there_and_quits);
+	RUN_TEST(test_command_wq_and_x_do_not_quit_when_the_write_fails);
+	RUN_TEST(test_command_x_writes_only_when_modified);
+	RUN_TEST(test_normal_zz_is_x);
+	RUN_TEST(test_normal_zq_is_q_bang);
+	RUN_TEST(test_normal_z_pending_state);
+	RUN_TEST(test_z_is_a_plain_character_in_insert_and_command_mode);
+	RUN_TEST(test_ctrl_q_quits_unless_modified);
+	RUN_TEST(test_ctrl_q_refused_in_insert_mode_after_typing);
+	RUN_TEST(test_quit_state_is_reset_by_free_and_load);
 }

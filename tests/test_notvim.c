@@ -134,6 +134,12 @@ static int wait_exit(pid_t pid) {
 	return -1;
 }
 
+/** @brief Quit a notvim in normal mode with unsaved changes (Ctrl+Q would be refused): ":q!" and wait_exit(). */
+static int discard_and_wait(int master, pid_t pid) {
+	if (write(master, ":q!\r", 4) != 4) kill(pid, SIGKILL);
+	return wait_exit(pid);
+}
+
 /** @brief Send Ctrl+Q to the child and return wait_exit() of it. */
 static int quit_and_wait(int master, pid_t pid) {
 	char ctrl_q = 0x11;
@@ -567,7 +573,7 @@ static void test_notvim_typing_in_insert_mode(void) {
 	size_t n = send_and_read(master, "\xc3", half, sizeof(half));
 	send_and_read(master, "\xa9", acc, sizeof(acc));
 	send_and_read(master, "\x1b", esc, sizeof(esc));
-	int status = quit_and_wait(master, pid);
+	int status = discard_and_wait(master, pid); /* ends in normal mode, modified */
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
@@ -603,7 +609,8 @@ static void test_notvim_enter_backspace_and_delete_split_and_join_lines(void) {
 	send_and_read(master, "\x1b[3~", out[4], sizeof(out[4])); /* ab, def: join with the next line */
 	send_and_read(master, "\x08", out[5], sizeof(out[5]));    /* ab, def -> abdef */
 	send_and_read(master, "\r", out[6], sizeof(out[6]));      /* split at 2: ab, def */
-	int status = quit_and_wait(master, pid);
+	send_and_read(master, "\x1b", out[7], sizeof(out[7]));
+	int status = discard_and_wait(master, pid);
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
@@ -1846,7 +1853,7 @@ static void screen_bottom(char *buf, size_t size, const char *bottom, int row, i
 	draw_expected_bottom(buf, size, "ab\r\ncd", (size_t)term_rows - 1, term_cols, padded, term_rows, row, col);
 }
 
-/** @brief ':' opens the command line on the bottom row with the cursor after the text, Enter on "x" shows E492 in plain video, and the next key brings the status line back. */
+/** @brief ':' opens the command line on the bottom row with the cursor after the text, Enter on "z" shows E492 in plain video, and the next key brings the status line back. */
 static void test_notvim_command_line_error_message_and_next_key(void) {
 	const char *path = tmpdir_write("cmd.txt", "ab\ncd\n");
 	TEST_ASSERT_NOT_NULL(path);
@@ -1856,7 +1863,7 @@ static void test_notvim_command_line_error_message_and_next_key(void) {
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	send_and_read(master, ":", o1, sizeof(o1));
-	send_and_read(master, "x", o2, sizeof(o2));
+	send_and_read(master, "z", o2, sizeof(o2));
 	send_and_read(master, "\r", o3, sizeof(o3));
 	send_and_read(master, "j", o4, sizeof(o4));
 	int status = quit_and_wait(master, pid);
@@ -1866,9 +1873,9 @@ static void test_notvim_command_line_error_message_and_next_key(void) {
 	char want[2048];
 	screen_bottom(want, sizeof(want), ":", 24, 2);
 	TEST_ASSERT_EQUAL_STRING(want, o1);
-	screen_bottom(want, sizeof(want), ":x", 24, 3);
+	screen_bottom(want, sizeof(want), ":z", 24, 3);
 	TEST_ASSERT_EQUAL_STRING(want, o2);
-	screen_bottom(want, sizeof(want), "E492: Not an editor command: x", 1, 1);
+	screen_bottom(want, sizeof(want), "E492: Not an editor command: z", 1, 1);
 	TEST_ASSERT_EQUAL_STRING(want, o3);
 	TEST_ASSERT_NULL_MESSAGE(strstr(o3, "\x1b[7m"), "a message is not in reverse video");
 	screen(want, sizeof(want), "ab\r\ncd", 2, 1);
@@ -1994,6 +2001,110 @@ static void test_notvim_w_without_a_name_and_with_one(void) {
 	TEST_ASSERT_EQUAL_MEMORY("hi\n", buf, 3);
 }
 
+/** @brief Send @p keys that must quit notvim, read what it writes in @p last and return the exit status; what it writes must END with the switch back from the alternate screen (the typed characters of a command line are redrawn before it). */
+static int quit_with_keys(int master, pid_t pid, const char *keys, char *last, size_t size) {
+	if (write(master, keys, strlen(keys)) < 0) kill(pid, SIGKILL);
+	read_output(master, last, size);
+	return wait_exit(pid);
+}
+
+/** @brief Assert that @p out ends with the switch back from the alternate screen and holds the other one nowhere else. */
+static void assert_left_alt_screen(const char *out) {
+	size_t n = strlen(out), m = strlen(ALT_LEAVE);
+	TEST_ASSERT_TRUE_MESSAGE(n >= m && strcmp(out + n - m, ALT_LEAVE) == 0, "the alternate screen was not left last");
+	TEST_ASSERT_NULL(strstr(out, "E37"));
+}
+
+/** @brief Read a whole file into @p buf (NUL-terminated); return its length. */
+static size_t file_text(const char *path, char *buf, size_t size) {
+	FILE *f = fopen(path, "rb");
+	size_t n = f ? fread(buf, 1, size - 1, f) : 0;
+	if (f) fclose(f);
+	buf[n] = '\0';
+	return n;
+}
+
+/** @brief ":q" quits an unmodified file with status 0; on a modified one it shows E37 and goes on, and ":q!" then quits without writing; both leave the alternate screen. */
+static void test_notvim_q_is_refused_when_modified_and_q_bang_forces(void) {
+	const char *path = tmpdir_write("qq.txt", "ab\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], o1[2048], o2[2048], last[1024], text[64];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	int status = quit_with_keys(master, pid, ":q\r", last, sizeof(last));
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	assert_left_alt_screen(last);
+	pid = spawn_notvim(path, 24, &master);
+	raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "ix\x1b", o1, sizeof(o1));
+	send_and_read(master, ":q\r", o2, sizeof(o2));
+	status = quit_with_keys(master, pid, ":q!\r", last, sizeof(last));
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_NOT_NULL_MESSAGE(strstr(o2, "E37: No write since last change (add ! to override)"), "refusal not shown");
+	TEST_ASSERT_NULL_MESSAGE(strstr(o2, ALT_LEAVE), "the refused quit must not leave");
+	TEST_ASSERT_EQUAL_INT(0, status);
+	assert_left_alt_screen(last);
+	file_text(path, text, sizeof(text));
+	TEST_ASSERT_EQUAL_STRING("ab\n", text);
+}
+
+/** @brief ":wq" and "ZZ" save the changes and quit with status 0; "ZQ" quits without saving. */
+static void test_notvim_wq_zz_and_zq_quit(void) {
+	const char *keys[] = { ":wq\r", "ZZ", "ZQ" };
+	const char *want[] = { "xab\n", "xab\n", "ab\n" };
+	for (int i = 0; i < 3; i++) {
+		const char *path = tmpdir_write("wq.txt", "ab\n");
+		TEST_ASSERT_NOT_NULL(path);
+		int master;
+		char first[1024], o1[2048], last[1024], text[64];
+		pid_t pid = spawn_notvim(path, 24, &master);
+		int raw = wait_until_raw(master);
+		read_output(master, first, sizeof(first));
+		send_and_read(master, "ix\x1b", o1, sizeof(o1));
+		int status = quit_with_keys(master, pid, keys[i], last, sizeof(last));
+		close(master);
+		TEST_ASSERT_TRUE(raw);
+		TEST_ASSERT_EQUAL_INT(0, status);
+		assert_left_alt_screen(last);
+		file_text(path, text, sizeof(text));
+		TEST_ASSERT_EQUAL_STRING(want[i], text);
+	}
+}
+
+/** @brief Ctrl+Q on a modified buffer shows E37 and goes on; a ":wq" whose write fails shows the error and goes on; ":q!" then quits. */
+static void test_notvim_ctrl_q_and_failed_wq_do_not_quit_a_modified_buffer(void) {
+	char path[256], cmd[300];
+	snprintf(path, sizeof(path), "nodir/f.txt"); /* relative: a long path would be cut on the bottom row */
+	snprintf(cmd, sizeof(cmd), ":w %s\r", path);
+	int master;
+	char first[1024], o1[2048], o2[2048], o3[2048], last[1024];
+	static char o4[65536]; /* every typed character of the long command redraws the screen */
+	pid_t pid = spawn_notvim(NULL, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "ihi", o1, sizeof(o1));
+	send_and_read(master, "\x11", o2, sizeof(o2));
+	send_and_read(master, "\x1b", o3, sizeof(o3)); /* alone in its write: a lone Esc */
+	send_and_read(master, cmd, o4, sizeof(o4));
+	send_and_read(master, ":wq\r", o3, sizeof(o3));
+	int status = quit_with_keys(master, pid, ":q!\r", last, sizeof(last));
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_NOT_NULL(strstr(o2, "E37: No write since last change (add ! to override)"));
+	TEST_ASSERT_NULL(strstr(o2, ALT_LEAVE));
+	TEST_ASSERT_NOT_NULL(strstr(o4, "No such file or directory"));
+	TEST_ASSERT_NULL(strstr(o4, ALT_LEAVE));
+	TEST_ASSERT_NOT_NULL(strstr(o3, "E32: No file name"));
+	TEST_ASSERT_EQUAL_INT(0, status);
+	assert_left_alt_screen(last);
+}
+
 void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_binary_enters_raw_and_quits_on_ctrl_q);
 	RUN_TEST(test_notvim_shows_file_lines);
@@ -2074,4 +2185,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_w_saves_an_lf_file_without_cr);
 	RUN_TEST(test_notvim_w_keeps_a_crlf_file_crlf);
 	RUN_TEST(test_notvim_w_without_a_name_and_with_one);
+	RUN_TEST(test_notvim_q_is_refused_when_modified_and_q_bang_forces);
+	RUN_TEST(test_notvim_wq_zz_and_zq_quit);
+	RUN_TEST(test_notvim_ctrl_q_and_failed_wq_do_not_quit_a_modified_buffer);
 }
