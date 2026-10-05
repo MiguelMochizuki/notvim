@@ -35,8 +35,8 @@ static int key_to_move(int key, editor_move_t *dir) {
 }
 
 /** @brief Draw the whole screen with the cursor, using the buffer @p out of @p size bytes. */
-static void redraw(const editor_t *e, int rows, char *out, size_t size) {
-	size_t n = editor_draw(e, (size_t)rows, out, size);
+static void redraw(const editor_t *e, int rows, int cols, char *out, size_t size) {
+	size_t n = editor_draw(e, (size_t)rows, (size_t)cols, out, size);
 	write(STDOUT_FILENO, out, n);
 }
 
@@ -63,15 +63,14 @@ int main(int argc, char **argv) {
 
 	int rows, cols;
 	terminal_get_size(STDOUT_FILENO, &rows, &cols);
-	/* ponytail: sized for rows of cols characters; a longer line uses up the room of the
-	 * rows after it. Clip lines to cols (horizontal clipping) if that matters. */
+	/* each of the rows lines is clipped to cols bytes, plus "\r\n" between them */
 	size_t size = (size_t)rows * ((size_t)cols + 2) + EDITOR_DRAW_OVERHEAD;
 	char *out = malloc(size);
 	if (!out) {
 		fprintf(stderr, "notvim: %s\n", strerror(ENOMEM));
 		return 1;
 	}
-	redraw(&e, rows, out, size);
+	redraw(&e, rows, cols, out, size);
 
 	key_parser_t parser;
 	key_parser_init(&parser);
@@ -84,7 +83,7 @@ int main(int argc, char **argv) {
 		if (key_to_move(key, &dir)) {
 			editor_move_cursor(&e, dir);
 			editor_scroll(&e, (size_t)rows);
-			redraw(&e, rows, out, size);
+			redraw(&e, rows, cols, out, size);
 		}
 	}
 

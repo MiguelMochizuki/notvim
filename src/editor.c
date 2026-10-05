@@ -98,7 +98,7 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->cx > last_col(e, e->cy)) e->cx = last_col(e, e->cy);
 }
 
-size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_size) {
+size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
 	if (out_size == 0) return 0;
 	size_t max = out_size - 1; /* room for the NUL */
 	size_t pos = 0;
@@ -106,8 +106,10 @@ size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_s
 	if (avail > max_rows) avail = max_rows;
 	for (size_t i = 0; i < avail; i++) {
 		const char *line = e->lines[e->rowoff + i];
+		size_t len = strlen(line);
+		if (len > max_cols) len = max_cols;
 		if (i > 0) put(out, &pos, max, "\r\n", 2);
-		put(out, &pos, max, line, strlen(line));
+		put(out, &pos, max, line, len);
 	}
 	out[pos] = '\0';
 	return pos;
@@ -151,15 +153,17 @@ int editor_load_file(editor_t *e, const char *path) {
 /** Upper bound for the cursor sequence "ESC [ row ; col H" with two 20-digit numbers. */
 #define CURSOR_SEQ_MAX 44
 
-size_t editor_draw(const editor_t *e, size_t max_rows, char *out, size_t out_size) {
+size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size) {
 	if (out_size < EDITOR_DRAW_OVERHEAD) {
 		if (out_size) out[0] = '\0';
 		return 0;
 	}
 	memcpy(out, CLEAR_HOME, CLEAR_HOME_LEN);
 	size_t pos = CLEAR_HOME_LEN;
-	pos += editor_render(e, max_rows, out + pos, out_size - pos - CURSOR_SEQ_MAX);
+	pos += editor_render(e, max_rows, max_cols, out + pos, out_size - pos - CURSOR_SEQ_MAX);
 	size_t row = e->cy >= e->rowoff ? e->cy - e->rowoff : 0;
-	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", row + 1, e->cx + 1);
+	size_t col = e->cx;
+	if (max_cols > 0 && col >= max_cols) col = max_cols - 1;
+	pos += (size_t)snprintf(out + pos, CURSOR_SEQ_MAX + 1, "\x1b[%zu;%zuH", row + 1, col + 1);
 	return pos;
 }

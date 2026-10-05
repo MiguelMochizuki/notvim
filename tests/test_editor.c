@@ -14,6 +14,8 @@
 
 /** A row limit larger than any test editor, for tests that are not about the limit. */
 #define ALL_ROWS 1000
+/** A width larger than any test line, for tests that are not about clipping. */
+#define ALL_COLS ((size_t)-1)
 
 /** @brief Ctrl+Q makes editor_should_exit() return 1. */
 static void test_editor_should_exit_on_ctrl_q(void) {
@@ -144,7 +146,7 @@ static void test_editor_free_is_safe_when_empty_or_repeated(void) {
 static void test_editor_render_no_lines(void) {
 	editor_init(&e);
 	char out[256] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("", out);
 }
 
@@ -153,7 +155,7 @@ static void test_editor_render_one_line(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
 }
 
@@ -164,7 +166,7 @@ static void test_editor_render_joins_lines_with_crlf(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(6, editor_render(&e, ALL_ROWS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(6, editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("a\r\n\r\nb", out);
 }
 
@@ -176,7 +178,7 @@ static void test_editor_render_limits_rows(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "c"));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "d"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("a\r\nb", out);
 }
 
@@ -187,7 +189,7 @@ static void test_editor_render_rows_equal_to_line_count(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "c"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(7, editor_render(&e, 3, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(7, editor_render(&e, 3, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("a\r\nb\r\nc", out);
 }
 
@@ -196,7 +198,7 @@ static void test_editor_render_zero_rows(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a"));
 	char out[256] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 0, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 0, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("", out);
 }
 
@@ -207,7 +209,7 @@ static void test_editor_render_blank_line_counts_as_a_row(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, ""));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "b"));
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, 2, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("a\r\n", out);
 }
 
@@ -216,7 +218,7 @@ static void test_editor_render_truncates_on_small_buffer(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abcdef"));
 	char out[4]; /* 3 chars + '\0' */
-	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(3, editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("abc", out);
 }
 
@@ -226,7 +228,7 @@ static void test_editor_render_truncates_across_lines(void) {
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "ab"));
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "cd"));
 	char out[5]; /* "ab\r\n" would need 4 chars + '\0'; "cd" is cut off */
-	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, ALL_ROWS, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("ab\r\n", out);
 }
 
@@ -235,7 +237,7 @@ static void test_editor_render_zero_size_returns_zero(void) {
 	editor_init(&e);
 	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "abc"));
 	char out[1] = { 'x' };
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, out, 0));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, ALL_ROWS, ALL_COLS, out, 0));
 	TEST_ASSERT_EQUAL_INT('x', out[0]); /* out must not be touched */
 }
 
@@ -462,7 +464,7 @@ static void test_editor_load_resets_the_cursor(void) {
 /** @brief Assert that editor_draw() of the shared editor gives @p expected in a roomy buffer. */
 static void assert_draw(size_t max_rows, const char *expected) {
 	char out[512];
-	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, max_rows, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, max_rows, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
@@ -507,10 +509,10 @@ static void test_editor_draw_buffer_too_small_writes_nothing(void) {
 	editor_init(&e);
 	append("ab");
 	char out[EDITOR_DRAW_OVERHEAD] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, out, EDITOR_DRAW_OVERHEAD - 1));
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, ALL_COLS, out, EDITOR_DRAW_OVERHEAD - 1));
 	TEST_ASSERT_EQUAL_STRING("", out);
 	char untouched[1] = { 'x' };
-	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, untouched, 0));
+	TEST_ASSERT_EQUAL_UINT(0, editor_draw(&e, 24, ALL_COLS, untouched, 0));
 	TEST_ASSERT_EQUAL_INT('x', untouched[0]);
 }
 
@@ -519,7 +521,7 @@ static void test_editor_draw_cuts_text_but_keeps_cursor_sequence(void) {
 	editor_init(&e);
 	append("abcdef");
 	char out[EDITOR_DRAW_OVERHEAD + 3];
-	size_t n = editor_draw(&e, 24, out, sizeof(out));
+	size_t n = editor_draw(&e, 24, ALL_COLS, out, sizeof(out));
 	const char *expected = CLEAR_HOME "abc" "\x1b[1;1H";
 	TEST_ASSERT_EQUAL_UINT(strlen(expected), n);
 	TEST_ASSERT_EQUAL_STRING(expected, out);
@@ -613,7 +615,7 @@ static void test_editor_render_starts_at_the_scroll_offset(void) {
 	append_letters(5);
 	e.rowoff = 2;
 	char out[256];
-	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(4, editor_render(&e, 2, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("c\r\nd", out);
 }
 
@@ -623,7 +625,7 @@ static void test_editor_render_offset_past_the_end_is_empty(void) {
 	append_letters(3);
 	e.rowoff = 10;
 	char out[256] = "garbage";
-	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 5, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_UINT(0, editor_render(&e, 5, ALL_COLS, out, sizeof(out)));
 	TEST_ASSERT_EQUAL_STRING("", out);
 }
 
@@ -643,6 +645,38 @@ static void test_editor_draw_cursor_above_the_window_is_row_one(void) {
 	e.rowoff = 3;
 	e.cy = 1;
 	assert_draw(2, CLEAR_HOME "d\r\ne" "\x1b[1;1H");
+}
+
+/** @brief Lines longer than max_cols are clipped on the right; shorter and exact ones are kept. */
+static void test_editor_render_clips_lines_to_max_cols(void) {
+	editor_init(&e);
+	append("abcdef");
+	append("gh");
+	append("ijk");
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(12, editor_render(&e, ALL_ROWS, 3, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("abc\r\ngh\r\nijk", out);
+}
+
+/** @brief With 0 columns every line is empty but the lines are still there. */
+static void test_editor_render_zero_cols_keeps_the_rows(void) {
+	editor_init(&e);
+	append("ab");
+	append("cd");
+	char out[256];
+	TEST_ASSERT_EQUAL_UINT(2, editor_render(&e, ALL_ROWS, 0, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING("\r\n", out);
+}
+
+/** @brief Clipping applies to the lines drawn, and the cursor is shown on the last column at most. */
+static void test_editor_draw_clips_lines_and_clamps_the_cursor_column(void) {
+	editor_init(&e);
+	append("abcdef");
+	e.cx = 5;
+	char out[512];
+	const char *expected = CLEAR_HOME "abc" "\x1b[1;3H";
+	TEST_ASSERT_EQUAL_UINT(strlen(expected), editor_draw(&e, 24, 3, out, sizeof(out)));
+	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
 /** @brief Register every test in this file with Unity. */
@@ -669,6 +703,9 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_truncates_on_small_buffer);
 	RUN_TEST(test_editor_render_truncates_across_lines);
 	RUN_TEST(test_editor_render_zero_size_returns_zero);
+	RUN_TEST(test_editor_render_clips_lines_to_max_cols);
+	RUN_TEST(test_editor_render_zero_cols_keeps_the_rows);
+	RUN_TEST(test_editor_draw_clips_lines_and_clamps_the_cursor_column);
 	RUN_TEST(test_editor_load_three_lines);
 	RUN_TEST(test_editor_load_no_trailing_newline);
 	RUN_TEST(test_editor_load_empty_file);

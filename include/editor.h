@@ -116,11 +116,15 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * @param max_rows Maximum number of lines to render, usually the terminal
  *                 height; 0 renders nothing. The first line rendered is
  *                 line @c rowoff; a @c rowoff past the last line renders nothing.
+ * @param max_cols Maximum number of bytes of each line to render, usually the
+ *                 terminal width. Longer lines are clipped on the right, so
+ *                 no line wraps and scrolls the terminal; there is no
+ *                 horizontal scrolling yet.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is 0.
  */
-size_t editor_render(const editor_t *e, size_t max_rows, char *out, size_t out_size);
+size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size);
 
 /**
  * @brief Load the file at @p path into @p e, replacing its contents.
@@ -150,12 +154,15 @@ int editor_load_file(editor_t *e, const char *path);
  *
  * @param e        Editor to draw; must not be NULL.
  * @param max_rows Maximum number of lines to render, usually the terminal height.
+ * @param max_cols Maximum number of bytes of each line, usually the terminal
+ *                 width; see editor_render(). A cursor column past it is drawn
+ *                 on the last column.
  * @param out      Destination buffer.
  * @param out_size Size of @p out in bytes; it should be at least
  *                 EDITOR_DRAW_OVERHEAD plus the rendered text.
  * @return Number of bytes written, excluding the NUL; 0 if @p out_size is
  *         smaller than EDITOR_DRAW_OVERHEAD.
  */
-size_t editor_draw(const editor_t *e, size_t max_rows, char *out, size_t out_size);
+size_t editor_draw(const editor_t *e, size_t max_rows, size_t max_cols, char *out, size_t out_size);
 
 #endif

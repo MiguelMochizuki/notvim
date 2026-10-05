@@ -168,6 +168,36 @@ static void test_notvim_shows_a_full_screen_of_long_lines(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
+/** @brief Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen. */
+static void test_notvim_clips_long_lines_to_the_terminal_width(void) {
+	char content[512] = "";
+	char text[512] = "";
+	char line[128], clipped[128];
+	for (int i = 0; i < 3; i++) {
+		memset(line, 'a' + i, 100);
+		line[100] = '\0';
+		memset(clipped, 'a' + i, 80); /* the terminal is 80 columns wide */
+		clipped[80] = '\0';
+		strcat(content, line);
+		strcat(content, "\n");
+		if (i > 0) strcat(text, "\r\n");
+		strcat(text, clipped);
+	}
+	const char *path = tmpdir_write("wide.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[1024], expected[1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
 /** @brief A missing file starts an empty editor, draws an empty screen and is not created. */
 static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	const char *path = tmpdir_path("new.txt");
@@ -362,6 +392,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
+	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
 }
