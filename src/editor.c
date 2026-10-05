@@ -562,6 +562,7 @@ static int handle_key(editor_t *e, int key) {
 	int zpend = e->zpend; /* any key, Ctrl+Q included, ends a pending Z */
 	e->zpend = 0;
 	if (key == 0x11) {
+		e->pend_len = 0;
 		if (e->mode == EDITOR_MODE_COMMAND) cmd_leave(e); /* a refusal shows in the message, which the command line would hide */
 		commands_run(e, "q");
 		return 1;

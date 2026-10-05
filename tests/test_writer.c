@@ -756,6 +756,15 @@ static void test_ctrl_q_clears_a_pending_z(void) {
 	TEST_ASSERT_EQUAL_INT(1, e.zpend);
 }
 
+/** @brief A refused Ctrl+Q ends a half-typed UTF-8 character: its continuation byte afterwards does not complete it. */
+static void test_ctrl_q_drops_a_half_typed_character(void) {
+	editor_free(&e);
+	type("ia\xc3");
+	editor_handle_key(&e, 0x11);
+	type("\xa9");
+	TEST_ASSERT_EQUAL_STRING("a", editor_line(&e, 0));
+}
+
 /** @brief Load and free clear a quit request and a pending Z. */
 static void test_quit_state_is_reset_by_free_and_load(void) {
 	open_q(0);
@@ -814,5 +823,6 @@ void test_writer_suite(void) {
 	RUN_TEST(test_ctrl_q_quits_unless_modified);
 	RUN_TEST(test_ctrl_q_refused_in_insert_mode_after_typing);
 	RUN_TEST(test_ctrl_q_clears_a_pending_z);
+	RUN_TEST(test_ctrl_q_drops_a_half_typed_character);
 	RUN_TEST(test_quit_state_is_reset_by_free_and_load);
 }
