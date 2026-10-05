@@ -219,6 +219,51 @@ static void test_notvim_arrow_keys_move_the_cursor_and_redraw(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, left);
 }
 
+/** @brief j, l, k and h move the cursor down, right, up and left, like the arrow keys. */
+static void test_notvim_hjkl_move_the_cursor_and_redraw(void) {
+	const char *path = tmpdir_write("hjkl.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], down[256], right[256], up[256], left[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "j", down, sizeof(down));
+	send_and_read(master, "l", right, sizeof(right));
+	send_and_read(master, "k", up, sizeof(up));
+	send_and_read(master, "h", left, sizeof(left));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[256];
+	screen(expected, sizeof(expected), "abc\r\ndef", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, down);
+	screen(expected, sizeof(expected), "abc\r\ndef", 2, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, right);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, up);
+	screen(expected, sizeof(expected), "abc\r\ndef", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, left);
+}
+
+/** @brief Uppercase H, J, K and L are not movement keys and do not redraw. */
+static void test_notvim_uppercase_hjkl_do_nothing(void) {
+	const char *path = tmpdir_write("upper.txt", "abc\ndef\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], after[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	size_t n = send_and_read(master, "HJKL", after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(0, n);
+}
+
 /** @brief An escape sequence that is not an arrow (Delete) is ignored and does not redraw. */
 static void test_notvim_ignored_escape_sequence_does_not_redraw(void) {
 	const char *path = tmpdir_write("ignored.txt", "abc\n");
@@ -275,6 +320,8 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_shows_only_the_rows_that_fit);
 	RUN_TEST(test_notvim_shows_a_full_screen_of_long_lines);
 	RUN_TEST(test_notvim_arrow_keys_move_the_cursor_and_redraw);
+	RUN_TEST(test_notvim_hjkl_move_the_cursor_and_redraw);
+	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
