@@ -971,6 +971,45 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, got);
 }
 
+/** @brief A CRLF file is shown without ^M, and the cursor stops on the last character (no hidden CR column). */
+static void test_notvim_shows_a_crlf_file_without_marks(void) {
+	const char *path = tmpdir_write("crlf.txt", "ab\r\ncd\r\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], right1[2048], right2[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "l", right1, sizeof(right1));
+	send_and_read(master, "l", right2, sizeof(right2));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), "ab\r\ncd", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+	screen(expected, sizeof(expected), "ab\r\ncd", 1, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, right1);
+	TEST_ASSERT_EQUAL_STRING(expected, right2); /* already on the b: the second l redraws the same screen */
+}
+
+/** @brief A mixed file keeps its CRs, shown as ^M. */
+static void test_notvim_shows_a_mixed_file_with_marks(void) {
+	const char *path = tmpdir_write("mixed.txt", "one\r\ntwo\nthree\r\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), "one^M\r\ntwo\r\nthree^M", 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -1030,4 +1069,6 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_three_byte_text);
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_four_byte_text);
 	RUN_TEST(test_notvim_navigates_by_character_with_keys_and_arrows);
+	RUN_TEST(test_notvim_shows_a_crlf_file_without_marks);
+	RUN_TEST(test_notvim_shows_a_mixed_file_with_marks);
 }

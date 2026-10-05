@@ -18,6 +18,7 @@ void editor_init(editor_t *e) {
 	e->lines = NULL;
 	e->count = 0;
 	e->cap = 0;
+	e->crlf = 0;
 	e->cy = 0;
 	e->cx = 0;
 	e->rowoff = 0;
@@ -181,19 +182,32 @@ int editor_load_file(editor_t *e, const char *path) {
 	size_t cap = 0;
 	ssize_t n;
 	int rc = 0;
+	size_t terminated = 0;  /* lines ended by '\n' */
+	int all_cr = 1;         /* whether each of them has '\r' right before the '\n' */
+	int last_terminated = 0;
 	while ((n = getline(&line, &cap, fp)) >= 0) {
 		if (memchr(line, '\0', (size_t)n)) { /* a C string would cut the line here */
 			errno = EILSEQ;
 			rc = -1;
 			break;
 		}
-		if (line[n - 1] == '\n') line[n - 1] = '\0';
+		last_terminated = line[n - 1] == '\n';
+		if (last_terminated) {
+			terminated++;
+			if (n < 2 || line[n - 2] != '\r') all_cr = 0;
+			line[n - 1] = '\0';
+		}
 		if (editor_append_line(e, line) < 0) {
 			rc = -1;
 			break;
 		}
 	}
 	if (rc == 0 && ferror(fp)) rc = -1;
+	if (rc == 0 && terminated > 0 && all_cr) {
+		/* the whole file has been seen: it is CRLF, so drop the CR of each terminated line (not of a last line without newline) */
+		e->crlf = 1;
+		for (size_t i = 0; i < e->count - (last_terminated ? 0 : 1); i++) e->lines[i][strlen(e->lines[i]) - 1] = '\0';
+	}
 
 	int saved = errno;
 	free(line);

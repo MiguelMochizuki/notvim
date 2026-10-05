@@ -15,6 +15,8 @@ typedef struct {
 	size_t cy;    /**< Cursor row: index of the line the cursor is on. */
 	size_t cx;    /**< Cursor column: byte index in that line, always at the start of a character (or of an invalid byte). */
 	size_t rowoff; /**< Index of the first visible line (vertical scroll offset). */
+	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
+	                   0 for an LF, mixed or empty file, no file, or after an error. */
 } editor_t;
 
 /** Directions for editor_move_cursor(). */
@@ -147,10 +149,22 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
  * Each '\n' ends a line and a final newline does not add an empty line, so
  * an empty file gives no lines.
  *
- * @param e    Editor to load into; must not be NULL. Left empty on error.
- * @param path Path of the file to load.
+ * The line-ending style is detected and recorded in @c crlf. The file is CRLF
+ * if it has at least one line ended by '\n' and every such line has '\r'
+ * right before the '\n'; a last line without a newline is ignored for this.
+ * For a CRLF file the '\r' of each terminated line is not stored. For any
+ * other file (LF, empty or mixed) nothing is removed, @c crlf is 0, and a '\r'
+ * is shown as ^M. A last line without a newline keeps a trailing '\r' even in
+ * a CRLF file (it is shown as ^M). @c crlf is also 0 for a nonexistent file and
+ * after an error. A saver (H4.1) must write "\r\n" after each line when @c crlf
+ * is set and "\n" otherwise; the lines of a mixed file keep their '\r' and are
+ * written back unchanged.
+ *
  * A file that contains a NUL byte is refused, so that a line is never shown
  * cut short and then saved over the original.
+ *
+ * @param e    Editor to load into; must not be NULL. Left empty on error.
+ * @param path Path of the file to load.
  *
  * @return 0 on success (including a nonexistent file), -1 on any other
  *         error (errno is set; EILSEQ for a file with a NUL byte).

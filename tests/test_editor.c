@@ -715,6 +715,358 @@ static void test_editor_load_refuses_a_nul_at_the_start_of_a_line(void) {
 	assert_load_refused("a\n\0b\n", 5);
 }
 
+/** @brief Write @p content to a file and load it into the shared (already initialised) editor; the load must succeed. */
+static void load_text(const char *content) {
+	const char *path = tmpdir_write("crlf.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+}
+
+/** @brief A CRLF file is stored without the CRs, and crlf is set. */
+static void test_editor_load_crlf_file_drops_the_cr_and_sets_crlf(void) {
+	editor_init(&e);
+	load_text("one\r\ntwo\r\nthree\r\n");
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "one");
+	assert_line(&e, 1, "two");
+	assert_line(&e, 2, "three");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief An LF file keeps its bytes and crlf is 0. */
+static void test_editor_load_lf_file_is_not_crlf(void) {
+	editor_init(&e);
+	load_text("one\ntwo\n");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "one");
+	assert_line(&e, 1, "two");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief An empty file has crlf 0, and so does a missing one. */
+static void test_editor_load_empty_and_missing_files_are_not_crlf(void) {
+	editor_init(&e);
+	load_text("");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_path("nope.txt")));
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A file that is only CR LF is one empty line. */
+static void test_editor_load_only_crlf_is_one_empty_line(void) {
+	editor_init(&e);
+	load_text("\r\n");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief Blank lines of a CRLF file are empty lines. */
+static void test_editor_load_crlf_blank_lines(void) {
+	editor_init(&e);
+	load_text("a\r\n\r\nb\r\n");
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "");
+	assert_line(&e, 2, "b");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief Only the CR right before the LF goes: a CR inside the line stays, and "CR CR LF" leaves one CR. */
+static void test_editor_load_crlf_removes_exactly_one_cr_per_line(void) {
+	editor_init(&e);
+	load_text("a\rb\r\n\r\r\n");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "a\rb");
+	assert_line(&e, 1, "\r");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief A mixed file (CRLF first, then LF) keeps every CR and crlf is 0: "every" line, not "any" or "the first". */
+static void test_editor_load_mixed_crlf_then_lf_keeps_the_cr(void) {
+	editor_init(&e);
+	load_text("a\r\nb\n");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "a\r");
+	assert_line(&e, 1, "b");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A mixed file (LF first, then CRLF) keeps every CR and crlf is 0: not "the last line". */
+static void test_editor_load_mixed_lf_then_crlf_keeps_the_cr(void) {
+	editor_init(&e);
+	load_text("a\nb\r\n");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "b\r");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief One LF line in the middle of CRLF lines makes the file mixed. */
+static void test_editor_load_one_lf_line_among_crlf_lines_is_mixed(void) {
+	editor_init(&e);
+	load_text("a\r\nb\nc\r\n");
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "a\r");
+	assert_line(&e, 1, "b");
+	assert_line(&e, 2, "c\r");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** Room for the big files below: 10000 lines of 6 bytes, a short last line and a long line. */
+#define BIG_BYTES 100000
+
+/** @brief Fill the static buffer @p buf with @p n lines "line" ended by CR LF, and return its length. */
+static size_t fill_crlf_lines(char *buf, int n) {
+	size_t len = 0;
+	for (int i = 0; i < n; i++) {
+		memcpy(buf + len, "line\r\n", 6);
+		len += 6;
+	}
+	buf[len] = '\0';
+	return len;
+}
+
+/** @brief Load @p len bytes of @p data (no NUL) into the initialised shared editor; the load must succeed. */
+static void load_bytes(const char *data, size_t len) {
+	const char *path = tmpdir_write_bytes("big.txt", data, len);
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+}
+
+/** @brief A deciding LF line 60 KB into the file, far past any read buffer, makes the file mixed: every CR stays. */
+static void test_editor_load_a_late_lf_line_makes_a_big_crlf_file_mixed(void) {
+	static char content[BIG_BYTES];
+	size_t len = fill_crlf_lines(content, 10000);
+	memcpy(content + len, "last\n", 5);
+	editor_init(&e);
+	load_bytes(content, len + 5);
+	TEST_ASSERT_EQUAL_UINT(10001, editor_line_count(&e));
+	assert_line(&e, 0, "line\r");
+	assert_line(&e, 5000, "line\r");
+	assert_line(&e, 9999, "line\r");
+	assert_line(&e, 10000, "last");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A big CRLF file (60 KB) loses every CR, from the first line to the last. */
+static void test_editor_load_a_big_crlf_file_loses_every_cr(void) {
+	static char content[BIG_BYTES];
+	size_t len = fill_crlf_lines(content, 10000);
+	editor_init(&e);
+	load_bytes(content, len);
+	TEST_ASSERT_EQUAL_UINT(10000, editor_line_count(&e));
+	assert_line(&e, 0, "line");
+	assert_line(&e, 5000, "line");
+	assert_line(&e, 9999, "line");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief Load a CRLF file whose first line is @p n times 'x', then "b": the first line is exactly the x's, without CR. */
+static void assert_long_first_line_crlf(size_t n) {
+	static char content[BIG_BYTES], expected[BIG_BYTES];
+	memset(content, 'x', n);
+	memcpy(content + n, "\r\nb\r\n", 5);
+	memset(expected, 'x', n);
+	expected[n] = '\0';
+	editor_init(&e);
+	load_bytes(content, n + 5);
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, expected);
+	assert_line(&e, 1, "b");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief A line of 10000 bytes (far longer than a read block) ends in CR LF: found and removed. */
+static void test_editor_load_crlf_after_a_very_long_line(void) {
+	assert_long_first_line_crlf(10000);
+}
+
+/** @brief The CR is byte 4094 and the LF byte 4095 of the file: both in the first 4096-byte block. */
+static void test_editor_load_crlf_with_cr_and_lf_ending_the_first_block(void) {
+	assert_long_first_line_crlf(4094);
+}
+
+/** @brief The CR is the last byte of the first 4096-byte block and the LF the first of the next. */
+static void test_editor_load_crlf_with_cr_and_lf_split_across_blocks(void) {
+	assert_long_first_line_crlf(4095);
+}
+
+/** @brief The same split with a bigger block size (8192). */
+static void test_editor_load_crlf_with_cr_and_lf_split_across_8k_blocks(void) {
+	assert_long_first_line_crlf(8191);
+}
+
+/** @brief A long line with CR LF and a later LF-only line is mixed: the long line keeps its CR. */
+static void test_editor_load_mixed_after_a_very_long_line_keeps_the_cr(void) {
+	static char content[BIG_BYTES], expected[BIG_BYTES];
+	memset(content, 'x', 10000);
+	memcpy(content + 10000, "\r\nb\n", 4);
+	memset(expected, 'x', 10000);
+	expected[10000] = '\r';
+	expected[10001] = '\0';
+	editor_init(&e);
+	load_bytes(content, 10004);
+	assert_line(&e, 0, expected);
+	assert_line(&e, 1, "b");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A blank LF line among CRLF lines makes the file mixed: it counts against CRLF. */
+static void test_editor_load_a_blank_lf_line_among_crlf_lines_is_mixed(void) {
+	editor_init(&e);
+	load_text("a\r\n\nb\r\n");
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "a\r");
+	assert_line(&e, 1, "");
+	assert_line(&e, 2, "b\r");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A file that starts with an empty LF line is mixed too (and the check must not read before the line). */
+static void test_editor_load_a_file_starting_with_a_blank_lf_line_is_mixed(void) {
+	editor_init(&e);
+	load_text("\nab\r\n");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "");
+	assert_line(&e, 1, "ab\r");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A file that is only "\n" is one empty line and not CRLF. */
+static void test_editor_load_only_lf_is_one_empty_line_and_not_crlf(void) {
+	editor_init(&e);
+	load_text("\n");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief The CR is gone from the stored line: right twice on "ab" stops on the b, not on a hidden CR. */
+static void test_editor_load_crlf_cursor_stops_on_the_last_character(void) {
+	editor_init(&e);
+	load_text("ab\r\ncd\r\n");
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
+	assert_cursor(0, 1);
+}
+
+/** @brief An unterminated last line without CR does not stop the file from being CRLF. */
+static void test_editor_load_crlf_with_an_unterminated_last_line(void) {
+	editor_init(&e);
+	load_text("a\r\nb");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "b");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief An unterminated last line that ends in CR keeps that CR: only terminated lines lose theirs. */
+static void test_editor_load_crlf_keeps_a_cr_on_the_unterminated_last_line(void) {
+	editor_init(&e);
+	load_text("a\r\nb\r");
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "b\r");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief With no terminated line there is nothing to detect: the file is not CRLF and keeps its CR. */
+static void test_editor_load_unterminated_line_alone_is_not_crlf(void) {
+	editor_init(&e);
+	load_text("abc\r");
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "abc\r");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief Characters other than ASCII are untouched by the CR removal. */
+static void test_editor_load_crlf_keeps_utf8_text(void) {
+	editor_init(&e);
+	load_text("caf\xc3\xa9\r\n\xe2\x82\xac\r\n\tx\r\n");
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "caf\xc3\xa9");
+	assert_line(&e, 1, "\xe2\x82\xac");
+	assert_line(&e, 2, "\tx");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+}
+
+/** @brief Loading an LF file after a CRLF file clears the flag, and the reverse sets it: the flag follows the file. */
+static void test_editor_load_crlf_flag_follows_the_file(void) {
+	editor_init(&e);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	load_text("b\n");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	assert_line(&e, 0, "b");
+	load_text("c\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	assert_line(&e, 0, "c");
+}
+
+/** @brief Loading a mixed or empty file or a missing one after a CRLF file clears the flag. */
+static void test_editor_load_crlf_flag_is_cleared_by_other_loads(void) {
+	editor_init(&e);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	load_text("a\r\nb\n");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	load_text("");
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_path("nope.txt")));
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A failed load (a directory) after a CRLF file clears the flag. */
+static void test_editor_load_crlf_flag_is_cleared_by_a_failed_load(void) {
+	editor_init(&e);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, tmpdir_path(".")));
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+}
+
+/** @brief A NUL still refuses a file that is otherwise CRLF, with the old contents gone and crlf 0. */
+static void test_editor_load_refuses_a_nul_in_a_crlf_file(void) {
+	editor_init(&e);
+	load_text("old\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	const char data[] = "a\r\nb\0c\r\nd\r\n";
+	const char *path = tmpdir_write_bytes("binary.bin", data, sizeof(data) - 1);
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_INT(EILSEQ, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief A NUL in the unterminated last line of a CRLF file is still refused. */
+static void test_editor_load_refuses_a_nul_in_the_last_line_of_a_crlf_file(void) {
+	const char data[] = "a\r\nb\0";
+	editor_init(&e);
+	const char *path = tmpdir_write_bytes("binary.bin", data, sizeof(data) - 1);
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_INT(EILSEQ, errno);
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
+/** @brief editor_init and editor_free reset crlf, even on a garbage struct and after a CRLF load. */
+static void test_editor_init_and_free_reset_crlf(void) {
+	memset(&e, 0xff, sizeof(e));
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+	load_text("a\r\n");
+	TEST_ASSERT_EQUAL_INT(1, e.crlf);
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
+}
+
 /** @brief Render the shared editor with @p max_cols columns and compare with @p expected. */
 static void assert_render_cols(size_t max_cols, const char *expected) {
 	char out[256];
@@ -1155,6 +1507,15 @@ static void test_editor_draw_cursor_on_the_last_four_byte_character_at_the_width
 	assert_draw_cursor_col(3, 2);
 }
 
+/** @brief A CRLF file is drawn without ^M, a mixed file with it (render of the stored lines). */
+static void test_editor_render_crlf_file_has_no_marks_and_mixed_file_has(void) {
+	editor_init(&e);
+	load_text("a\r\nb\r\n");
+	assert_render_cols(ALL_COLS, "a\r\nb");
+	load_text("a\r\nb\n");
+	assert_render_cols(ALL_COLS, "a^M\r\nb");
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -1256,6 +1617,37 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_cursor_vertical_clamp_uses_invalid_bytes_and_c1_as_characters);
 	RUN_TEST(test_editor_cursor_vertical_move_never_lands_inside_a_character);
 	RUN_TEST(test_editor_cursor_vertical_move_keeps_a_valid_byte_index);
+	RUN_TEST(test_editor_load_crlf_file_drops_the_cr_and_sets_crlf);
+	RUN_TEST(test_editor_load_lf_file_is_not_crlf);
+	RUN_TEST(test_editor_load_empty_and_missing_files_are_not_crlf);
+	RUN_TEST(test_editor_load_only_crlf_is_one_empty_line);
+	RUN_TEST(test_editor_load_crlf_blank_lines);
+	RUN_TEST(test_editor_load_crlf_removes_exactly_one_cr_per_line);
+	RUN_TEST(test_editor_load_mixed_crlf_then_lf_keeps_the_cr);
+	RUN_TEST(test_editor_load_mixed_lf_then_crlf_keeps_the_cr);
+	RUN_TEST(test_editor_load_one_lf_line_among_crlf_lines_is_mixed);
+	RUN_TEST(test_editor_load_crlf_with_an_unterminated_last_line);
+	RUN_TEST(test_editor_load_crlf_keeps_a_cr_on_the_unterminated_last_line);
+	RUN_TEST(test_editor_load_unterminated_line_alone_is_not_crlf);
+	RUN_TEST(test_editor_load_crlf_keeps_utf8_text);
+	RUN_TEST(test_editor_load_a_late_lf_line_makes_a_big_crlf_file_mixed);
+	RUN_TEST(test_editor_load_a_big_crlf_file_loses_every_cr);
+	RUN_TEST(test_editor_load_crlf_after_a_very_long_line);
+	RUN_TEST(test_editor_load_crlf_with_cr_and_lf_ending_the_first_block);
+	RUN_TEST(test_editor_load_crlf_with_cr_and_lf_split_across_blocks);
+	RUN_TEST(test_editor_load_crlf_with_cr_and_lf_split_across_8k_blocks);
+	RUN_TEST(test_editor_load_mixed_after_a_very_long_line_keeps_the_cr);
+	RUN_TEST(test_editor_load_a_blank_lf_line_among_crlf_lines_is_mixed);
+	RUN_TEST(test_editor_load_a_file_starting_with_a_blank_lf_line_is_mixed);
+	RUN_TEST(test_editor_load_only_lf_is_one_empty_line_and_not_crlf);
+	RUN_TEST(test_editor_load_crlf_cursor_stops_on_the_last_character);
+	RUN_TEST(test_editor_load_crlf_flag_follows_the_file);
+	RUN_TEST(test_editor_load_crlf_flag_is_cleared_by_other_loads);
+	RUN_TEST(test_editor_load_crlf_flag_is_cleared_by_a_failed_load);
+	RUN_TEST(test_editor_load_refuses_a_nul_in_a_crlf_file);
+	RUN_TEST(test_editor_load_refuses_a_nul_in_the_last_line_of_a_crlf_file);
+	RUN_TEST(test_editor_init_and_free_reset_crlf);
+	RUN_TEST(test_editor_render_crlf_file_has_no_marks_and_mixed_file_has);
 	RUN_TEST(test_editor_render_does_not_swallow_a_control_byte_after_a_lead_byte);
 	RUN_TEST(test_editor_render_tab_after_question_mark_cells);
 	RUN_TEST(test_editor_draw_cursor_column_after_question_mark_cells_and_a_tab);
