@@ -358,6 +358,52 @@ static void test_notvim_scrolls_when_the_cursor_leaves_the_screen(void) {
 	TEST_ASSERT_EQUAL_STRING(three, u3);
 }
 
+/** @brief A lone Esc does not redraw and does not swallow the key that comes after it. */
+static void test_notvim_lone_escape_does_not_swallow_the_next_key(void) {
+	const char *path = tmpdir_write("esc.txt", "a\nb\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], after_esc[256], after_j[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	/* send_and_read waits 300 ms for output, far longer than the Esc timeout */
+	size_t n = send_and_read(master, "\x1b", after_esc, sizeof(after_esc));
+	send_and_read(master, "j", after_j, sizeof(after_j));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(0, n);
+	char expected[256];
+	screen(expected, sizeof(expected), "a\r\nb", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after_j);
+}
+
+/** @brief An arrow key whose bytes arrive a few milliseconds apart is still an arrow. */
+static void test_notvim_arrow_split_across_writes_still_works(void) {
+	const char *path = tmpdir_write("split.txt", "a\nb\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[256], after[256];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	ssize_t w1 = write(master, "\x1b", 1);
+	usleep(10000); /* well inside the Esc timeout */
+	ssize_t w2 = write(master, "[B", 2);
+	read_output(master, after, sizeof(after));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_INT(1, (int)w1);
+	TEST_ASSERT_EQUAL_INT(2, (int)w2);
+	char expected[256];
+	screen(expected, sizeof(expected), "a\r\nb", 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after);
+}
+
 /** @brief An ordinary key does nothing yet and does not redraw. */
 static void test_notvim_ordinary_key_does_not_redraw(void) {
 	const char *path = tmpdir_write("plain.txt", "abc\n");
@@ -422,6 +468,8 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_ignored_escape_sequence_does_not_redraw);
 	RUN_TEST(test_notvim_scrolls_when_the_cursor_leaves_the_screen);
+	RUN_TEST(test_notvim_lone_escape_does_not_swallow_the_next_key);
+	RUN_TEST(test_notvim_arrow_split_across_writes_still_works);
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);

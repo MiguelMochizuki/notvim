@@ -3,6 +3,7 @@
  * @brief Program entry point: terminal setup, initial render and input loop.
  */
 #include <errno.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -78,9 +79,21 @@ int main(int argc, char **argv) {
 
 	key_parser_t parser;
 	key_parser_init(&parser);
-	char c;
-	while (read(STDIN_FILENO, &c, 1) == 1) {
-		int key = key_parser_feed(&parser, (unsigned char)c);
+	for (;;) {
+		/* inside an escape sequence wait only a moment: a lone Esc has nothing after it */
+		struct pollfd pfd = { .fd = STDIN_FILENO, .events = POLLIN };
+		int ready = poll(&pfd, 1, key_parser_pending(&parser) ? KEY_ESC_TIMEOUT_MS : -1);
+		int key;
+		if (ready == 0) {
+			key = key_parser_timeout(&parser);
+		} else if (ready < 0) {
+			if (errno == EINTR) continue;
+			break;
+		} else {
+			char c;
+			if (read(STDIN_FILENO, &c, 1) != 1) break;
+			key = key_parser_feed(&parser, (unsigned char)c);
+		}
 		if (key == KEY_NONE) continue;
 		if (key < 256 && editor_should_exit((char)key)) break;
 		editor_move_t dir;
