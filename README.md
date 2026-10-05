@@ -10,9 +10,9 @@ Early development. Currently supports:
 - Raw mode input (no echo, no line buffering)
 - Exit with `Ctrl+Q`
 - Opening a file given on the command line and showing its lines, up to the terminal height (read-only)
-- Moving the cursor with the arrow keys or `h j k l`
+- Moving the cursor with the arrow keys or `h j k l`, scrolling when it leaves the screen
 
-Not yet implemented: scrolling, insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
+Not yet implemented: insertion mode, saving, command mode. See [BACKLOG.md](BACKLOG.md) for the roadmap.
 
 ## Build
 
@@ -43,7 +43,7 @@ More will come as histories land.
 
 - `src/main.c`: entry point (argument, raw mode, input loop, key mapping, redraw after each move).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
-  the cursor, loading a file, rendering and drawing up to a number of rows.
+  the cursor and vertical scrolling, loading a file, rendering and drawing a window of rows.
 - `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows).
 - `src/terminal.c`, `include/terminal.h`: raw mode and terminal size.
 - `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
