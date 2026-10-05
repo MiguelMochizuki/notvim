@@ -15,10 +15,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
-  - Reproduced: after the terminal shrinks to 8 rows, notvim still draws 24.
-  - The draw buffer must be reallocated for the new size.
-  - Idea: the signal pipe of H6.6 (`stopsig`) is the model: a handler that writes one byte, polled together with stdin. `SIGWINCH` is not a stop signal, so it needs its own pipe or a more general module.
+- **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
+  - Reproduced: clipping a 201-byte line to 80 bytes gives invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
+  - Out of scope: double-width (CJK) and combining characters.
 
 ## To do
 
@@ -27,9 +26,6 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 Each story below was reproduced against the real binary on a pty.
 They are ordered by harm: data loss first, then anything that corrupts or commands the terminal, then display correctness, then usability.
 
-- **H6.8** As user, I want text with accents or other UTF-8 characters shown and navigated by character, so that the cursor never lands inside a character and clipping never cuts one
-  - Reproduced: clipping a 201-byte line to 80 bytes gives invalid UTF-8 and only 40 characters; two `l` presses put the cursor inside a character.
-  - Out of scope: double-width (CJK) and combining characters.
 - **H6.9** As user, I want CRLF files shown without a stray `\r`, and saved back with CRLF
   - Reproduced: `abc\r\ndef\r\n` is drawn as `abc\r\r\ndef\r`.
   - The saving half belongs with H4.1.
@@ -120,7 +116,7 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - Loading errors: any other open or read error makes `editor_load_file` return -1 with `errno` set and an empty editor.
   - `notvim` then prints `notvim: <path>: <reason>` and exits 1 before entering raw mode, so the message shows on a normal terminal.
   - Rendering: lines are joined by `\r\n`, because raw mode clears `OPOST` and a bare `\n` would not return to column 0. An OS-dependent line-ending macro was discussed and not added (UNIX only).
-  - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). There is no `SIGWINCH` handling (H6.7).
+  - Terminal size: read once at startup with `TIOCGWINSZ`; each dimension falls back to 24 rows / 80 columns when unreadable or 0 (a fresh pty reports 0x0). It is read again on `SIGWINCH` (H6.7).
   - Known gaps:
     - CRLF files and NUL bytes inside lines are not handled (the `\r` stays, a NUL cuts the line): see H6.9 and H6.2.
     - The out-of-memory path of `editor_load_file`, and the cleanup after a read error halfway through a file, are not tested: see H0.11.
@@ -205,3 +201,9 @@ They are ordered by harm: data loss first, then anything that corrupts or comman
   - A signal ends the loop and `main` returns through the normal exit, so the alternate screen and the tty modes are restored. The exit status is 128 plus the signal number, as shells report it (143, 129, 130).
   - `SIGINT` matters although `Ctrl+C` is only a byte in raw mode: `kill -INT` still delivers it. `stopsig_remove` restores the previous handlers, because the test runner's own temporary-directory handlers (H0.7) use the same signals.
   - Known gaps: a signal during file loading uses the default action, which is safe because nothing has been changed yet. A crash or `SIGKILL` still leaves the terminal as it is. `SIGTSTP` and `SIGQUIT` are not handled (`Ctrl+Z` and `Ctrl+\` are bytes in raw mode).
+- **H6.7** As user, I want notvim to follow terminal resizes (`SIGWINCH`), so that the screen is always drawn for the current size
+  - Reproduced: after the terminal shrinks to 8 rows by 30 columns, notvim still drew 24 rows.
+  - Design: a new module `winch`, the same self-pipe pattern as `stopsig`, with its own pipe because `SIGWINCH` must not end the loop. `winch_drain` empties the non-blocking pipe, so a burst of resizes is one redraw.
+  - On a resize `main` re-reads the size, reallocates the draw buffer, calls `editor_scroll` and redraws. `draw_buffer_size()` is the single place that computes the buffer size.
+  - Decisions: the handler is installed before raw mode, like `stopsig`. If `realloc` fails the old buffer and size are kept and nothing is redrawn. A resize in the middle of an escape sequence redraws and leaves the sequence pending.
+  - Known gaps: the write end of the pipe is not tested for being non-blocking (needs 64 KB of signals). A resize while the file is loading is lost, which is harmless because the size is read afterwards.
