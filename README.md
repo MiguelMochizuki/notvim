@@ -11,9 +11,9 @@ What works today:
 
 - Opening a file given on the command line and showing its lines, up to the terminal height minus the status line
 - A status line on the last row: file name (or `[No Name]`), `[dos]` for a CRLF file, `[+]` once the text is changed, the mode (`NORMAL` or `INSERT`) and `line,col` at the right
-- Moving the cursor and scrolling vertically when it leaves the screen
+- Moving the cursor and scrolling when it leaves the screen, vertically and horizontally (one line or column at a time)
 - Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit
-- Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen (except double-width characters, see Known limitations)
+- Lines wider than the terminal scroll sideways with the cursor, so nothing wraps and scrolls the screen (except double-width characters, see Known limitations); the status line keeps the absolute column
 
 Keys:
 
@@ -41,9 +41,8 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 
 | Next | Stories |
 |------|---------|
-| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w`; quitting with `:q`, `:q!`, `:wq`, `:x`, `ZZ`, `ZQ` |
-| In progress | horizontal scrolling of long lines |
-| Navigation | Scrolling long lines horizontally; double-width characters |
+| Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w`; quitting with `:q`, `:q!`, `:wq`, `:x`, `ZZ`, `ZQ`; scrolling long lines horizontally |
+| Next | Hardening: double-width characters (H6.12) and the last robustness story (H6.13) |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
 | Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, command-line history and editing |
@@ -55,6 +54,7 @@ The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 
 - A file with mixed line endings (some CRLF, some LF) shows `^M` on its CRLF lines. `:w` writes such a file back unchanged.
 - Double-width (CJK, emoji) and combining characters take one column each in notvim, but the terminal draws wide ones in two. A long line of them wraps onto the next row, pushes the rows below down and can scroll the screen; the cursor column is off too (planned as H6.12).
+- Horizontal scrolling moves one column at a time; Vim's default recentres the cursor (half a screen) and there is no `sidescrolloff`.
 - Invalid UTF-8 and C1 controls are shown as `?` (saved as they were).
 - `:w` loses hard links (the rename makes a new file), does not `fsync` the directory, keeps no backup file and does not keep the owner and group.
 
@@ -93,7 +93,7 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail `make tes
 
 - `src/main.c`: entry point (argument, raw mode, input loop, redraw after each key that does something).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
-  the modes, the key dispatch, the cursor and vertical scrolling, loading a file, the path it was loaded from, the status line, rendering and drawing the screen.
+  the modes, the key dispatch, the cursor and scrolling, loading a file, the path it was loaded from, the status line, rendering and drawing the screen.
 - `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows, a lone Esc after a timeout).
 - `src/stopsig.c`, `include/stopsig.h`: catching SIGINT, SIGTERM and SIGHUP through a pipe, so the terminal is restored.
 - `src/terminal.c`, `include/terminal.h`: raw mode, alternate screen and terminal size.
