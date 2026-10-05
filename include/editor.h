@@ -136,8 +136,11 @@ size_t editor_render(const editor_t *e, size_t max_rows, size_t max_cols, char *
  *
  * @param e    Editor to load into; must not be NULL. Left empty on error.
  * @param path Path of the file to load.
+ * A file that contains a NUL byte is refused, so that a line is never shown
+ * cut short and then saved over the original.
+ *
  * @return 0 on success (including a nonexistent file), -1 on any other
- *         error (errno is set).
+ *         error (errno is set; EILSEQ for a file with a NUL byte).
  */
 int editor_load_file(editor_t *e, const char *path);
 

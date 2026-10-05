@@ -679,6 +679,42 @@ static void test_editor_draw_clips_lines_and_clamps_the_cursor_column(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, out);
 }
 
+/** @brief Assert that loading @p len bytes of @p data is refused as a binary file and leaves the editor empty. */
+static void assert_load_refused(const char *data, size_t len) {
+	editor_init(&e);
+	append("old");
+	const char *path = tmpdir_write_bytes("binary.bin", data, len);
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_INT(EILSEQ, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+}
+
+/** @brief A NUL byte in the middle of a line makes the load fail with EILSEQ instead of cutting the line. */
+static void test_editor_load_refuses_a_nul_byte_in_a_line(void) {
+	assert_load_refused("a\0b\n", 4);
+}
+
+/** @brief A NUL in a later line empties the editor, including the lines already loaded. */
+static void test_editor_load_refuses_a_nul_after_good_lines(void) {
+	assert_load_refused("one\ntwo\nth\0ree\n", 14);
+}
+
+/** @brief A NUL in a last line without a trailing newline is found too. */
+static void test_editor_load_refuses_a_nul_in_the_last_unterminated_line(void) {
+	assert_load_refused("a\nb\0", 5);
+}
+
+/** @brief A file that is only a NUL byte is refused. */
+static void test_editor_load_refuses_a_file_that_is_only_nul(void) {
+	assert_load_refused("\0", 1);
+}
+
+/** @brief A NUL at the very start of a line (an empty-looking line) is found. */
+static void test_editor_load_refuses_a_nul_at_the_start_of_a_line(void) {
+	assert_load_refused("a\n\0b\n", 5);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -715,6 +751,11 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_load_missing_file_discards_old_contents);
 	RUN_TEST(test_editor_load_directory_fails_with_eisdir);
 	RUN_TEST(test_editor_load_unreadable_file_fails_with_eacces);
+	RUN_TEST(test_editor_load_refuses_a_nul_byte_in_a_line);
+	RUN_TEST(test_editor_load_refuses_a_nul_after_good_lines);
+	RUN_TEST(test_editor_load_refuses_a_nul_in_the_last_unterminated_line);
+	RUN_TEST(test_editor_load_refuses_a_file_that_is_only_nul);
+	RUN_TEST(test_editor_load_refuses_a_nul_at_the_start_of_a_line);
 	RUN_TEST(test_editor_cursor_starts_at_origin);
 	RUN_TEST(test_editor_cursor_does_not_move_without_lines);
 	RUN_TEST(test_editor_cursor_right_stops_on_last_character);

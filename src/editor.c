@@ -128,6 +128,11 @@ int editor_load_file(editor_t *e, const char *path) {
 	ssize_t n;
 	int rc = 0;
 	while ((n = getline(&line, &cap, fp)) >= 0) {
+		if (memchr(line, '\0', (size_t)n)) { /* a C string would cut the line here */
+			errno = EILSEQ;
+			rc = -1;
+			break;
+		}
 		if (line[n - 1] == '\n') line[n - 1] = '\0';
 		if (editor_append_line(e, line) < 0) {
 			rc = -1;

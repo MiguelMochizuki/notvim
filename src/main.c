@@ -58,7 +58,8 @@ int main(int argc, char **argv) {
 	editor_init(&e);
 
 	if (argc > 1 && editor_load_file(&e, argv[1]) < 0) {
-		fprintf(stderr, "notvim: %s: %s\n", argv[1], strerror(errno));
+		const char *reason = errno == EILSEQ ? "binary file (contains NUL bytes)" : strerror(errno);
+		fprintf(stderr, "notvim: %s: %s\n", argv[1], reason);
 		return 1;
 	}
 

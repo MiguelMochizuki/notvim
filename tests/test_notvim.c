@@ -441,6 +441,24 @@ static void test_notvim_leaves_the_alternate_screen_on_exit(void) {
 	TEST_ASSERT_EQUAL_STRING(ALT_LEAVE, last);
 }
 
+/** @brief A binary file is refused with a clear message on the normal screen and exit status 1. */
+static void test_notvim_refuses_a_binary_file(void) {
+	const char data[] = { 'a', '\0', 'b', '\n' };
+	const char *path = tmpdir_write_bytes("binary.bin", data, sizeof(data));
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[512];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	read_output(master, out, sizeof(out));
+	int status = wait_exit(pid);
+	close(master);
+	TEST_ASSERT_EQUAL_INT(1, status);
+	TEST_ASSERT_EQUAL_INT(0, strncmp(out, "notvim: ", 8));
+	TEST_ASSERT_NOT_NULL(strstr(out, path));
+	TEST_ASSERT_NOT_NULL(strstr(out, "binary file"));
+	TEST_ASSERT_NULL(strstr(out, "\x1b[?1049"));
+}
+
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
 static void test_notvim_load_error_reports_and_exits_1(void) {
 	const char *path = tmpdir_path("."); /* a directory: fopen works, reading fails */
@@ -474,5 +492,6 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
+	RUN_TEST(test_notvim_refuses_a_binary_file);
 	RUN_TEST(test_notvim_load_error_reports_and_exits_1);
 }
