@@ -132,6 +132,9 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
 /**
  * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
  *
+ * The pure text view of the rows. editor_draw() draws the screen with the same row writer, so this is
+ * what the tests and any tool that wants the text without escape sequences use.
+ *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
  * turns off output processing. A blank line counts as a row. A tab is drawn
  * as spaces up to the next multiple of 8 columns (cut at the right edge). Text is UTF-8
