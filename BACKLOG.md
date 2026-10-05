@@ -19,19 +19,17 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
-  - `Esc` is now recognised (H6.1): the decoder reports `KEY_ESC`.
-  - The `h j k l` mapping (H2.2) must apply only in normal mode, because `h` has to type `h` in insert mode.
-  - The status line (H5.1) shows the mode through `editor_mode_label()`, which returns `NORMAL` today: this story changes that one function.
+- **H3.2** As user, I want to type characters in insert mode and see them in the buffer
+  - Ordinary printable keys in insert mode are ignored today (H3.1): `editor_handle_key()` is where typing goes.
+  - The cursor may already sit after the last character in insert mode (`cx` equal to the length of the line).
 
 ## To do
 
-Order of work: H3.1 to H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H3.2 and H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H3 Insert mode
 
-- **H3.2** As user, I want to type characters in insert mode and see them in the buffer
 - **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
 
 ### H4 Saving and quitting
@@ -124,6 +122,15 @@ Do these once insert mode and yank exist.
 
 ## Done
 
+### H3 Insert mode
+
+- **H3.1** As user, I want to press `i` to enter insert mode and `Esc` to leave it, so typing and commands don't collide
+  - Design: `editor_t.mode` (`EDITOR_MODE_NORMAL`/`INSERT`); `editor_handle_key()` in `editor.c` dispatches keys by mode (moved out of `main.c`, unit-testable); `main` redraws when it returns non-zero.
+  - Design: `editor_move_cursor()` and `col_to_cx()` allow `cx == strlen(line)` in insert mode; the status label comes from `editor_mode_label()`.
+  - Decisions: checked against Vim 9.1: `Esc` moves one character left unless at column 0 and always sets `wantcol`; right stops at the end of the line; left comes back from it.
+  - Decisions: up/down in insert mode go to the end of a line when `wantcol` reaches its end (tab and multibyte lines included), else to the character holding the column; `h j k l` do nothing there.
+  - Known gaps: printable keys in insert mode do nothing until H3.2; `Ctrl+Q` quits at once, with no unsaved-change protection (H4); `i` is the only way into insert mode (`a A I o O` are H9).
+
 ### H0 Development foundations
 
 - **H0.1** As dev, I want a `Makefile` with `all`, `test` and `clean` for compiling and testing with a single command
@@ -199,7 +206,7 @@ Do these once insert mode and yank exist.
 - **H2.2** As user, I want to move the cursor with `h j k l`, as in Vim
   - The mapping is `key_to_move` in `main.c`, tested end to end on a pty. It behaves exactly like the arrows, so the clamping rules are not retested.
   - Uppercase `H J K L` are left unmapped on purpose (Vim gives them other meanings).
-  - To do with H3.1: apply the mapping only in normal mode.
+  - Applied only in normal mode since H3.1.
 - **H2.3** As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
   - Design: `editor_t` gets `rowoff`, the index of the first visible line.
     - `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`.
@@ -237,7 +244,7 @@ Do these once insert mode and yank exist.
   - Reproduced: after `Esc`, even a second later, the next `j` did nothing (the decoder was still waiting for an escape sequence, H2.1).
   - Design: the decoder stays pure and gets the time from outside. `key_parser_pending` says whether it is inside a sequence, and `key_parser_timeout` turns a lone `ESC` into `KEY_ESC` or abandons a longer sequence.
   - `main` waits on stdin with `poll()`: without limit when idle, `KEY_ESC_TIMEOUT_MS` (50 ms) while a sequence is pending. The raw-mode flags and their tests are unchanged (`VMIN`/`VTIME` was the alternative).
-  - `KEY_ESC` is reported but nothing uses it yet; H3.1 will leave insert mode with it.
+  - `KEY_ESC` is reported but nothing uses it yet; H3.1 leaves insert mode with it.
   - Known gap: a terminal that sends the bytes of an arrow key more than 50 ms apart (a very slow link) would be read as `Esc` followed by `[` and a letter.
 - **H6.2** As user, I want a file with NUL bytes to be refused with a clear error, so that it is never loaded cut short and then saved over
   - Reproduced: a line `a\0b` was drawn as `a`. With `:w` (H4.1) the rest of the line would have been lost.
