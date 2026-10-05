@@ -820,6 +820,9 @@ static void test_notvim_sigterm_after_a_resize_still_exits_cleanly(void) {
 	TEST_ASSERT_EQUAL_INT(128 + SIGTERM, status);
 }
 
+/** @brief Number of elements of an array. */
+#define COUNT(a) (sizeof(a) / sizeof((a)[0]))
+
 /** @brief Append @p count copies of @p unit to @p dst. */
 static void append_repeated(char *dst, const char *unit, int count) {
 	for (int i = 0; i < count; i++) strcat(dst, unit);
@@ -932,28 +935,6 @@ static void test_notvim_resize_draws_a_full_screen_of_four_byte_text(void) {
 	assert_full_multibyte_screen("\xf0\x9f\x98\x80", 2);
 }
 
-/** @brief 'l' and 'j' move by character: after one 'l' on three e-acutes, 'j' stays on the second character of the next line. */
-static void test_notvim_cursor_moves_by_character_over_utf8_text(void) {
-	const char *path = tmpdir_write("move.txt", "\xc3\xa9\xc3\xa9\xc3\xa9\nabcdef\n");
-	TEST_ASSERT_NOT_NULL(path);
-	int master;
-	char first[512], after_l[1024], after_j[1024], expected[1024];
-	const char *text = "\xc3\xa9\xc3\xa9\xc3\xa9\r\nabcdef";
-	pid_t pid = spawn_notvim(path, 24, &master);
-	int raw = wait_until_raw(master);
-	read_output(master, first, sizeof(first));
-	send_and_read(master, "l", after_l, sizeof(after_l));
-	send_and_read(master, "j", after_j, sizeof(after_j));
-	int status = quit_and_wait(master, pid);
-	close(master);
-	TEST_ASSERT_TRUE(raw);
-	TEST_ASSERT_EQUAL_INT(0, status);
-	screen(expected, sizeof(expected), text, 1, 2); /* one character right, not one byte: column 2 */
-	TEST_ASSERT_EQUAL_STRING(expected, after_l);
-	screen(expected, sizeof(expected), text, 2, 3); /* cx is byte 2, kept by 'j' on a line of one-byte characters */
-	TEST_ASSERT_EQUAL_STRING(expected, after_j);
-}
-
 /** @brief h, j, k and the arrow keys move by character, and a vertical move into a character snaps to its start. */
 static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 	const char *path = tmpdir_write("nav.txt", "abcdef\n\xc3\xa9\xc3\xa9\xc3\xa9\nabcdef\n");
@@ -969,21 +950,25 @@ static void test_notvim_navigates_by_character_with_keys_and_arrows(void) {
 		{ "h", 2, 1 },        /* left: previous character, byte 0 */
 		{ "k", 1, 1 },
 	};
+	char keys[64] = "", expected[4096] = "";
+	for (size_t i = 0; i < COUNT(steps); i++) {
+		char one[512];
+		strcat(keys, steps[i].keys);
+		screen(one, sizeof(one), text, steps[i].row, steps[i].col);
+		strcat(expected, one);
+	}
 	int master;
-	char first[1024], got[10][1024];
+	char first[1024], got[4096];
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
-	for (size_t i = 0; i < 10; i++) send_and_read(master, steps[i].keys, got[i], sizeof(got[i]));
+	/* every key redraws once and in order, so the keys can go in one write and the redraws come back concatenated */
+	send_and_read(master, keys, got, sizeof(got));
 	int status = quit_and_wait(master, pid);
 	close(master);
 	TEST_ASSERT_TRUE(raw);
 	TEST_ASSERT_EQUAL_INT(0, status);
-	for (size_t i = 0; i < 10; i++) {
-		char expected[1024];
-		screen(expected, sizeof(expected), text, steps[i].row, steps[i].col);
-		TEST_ASSERT_EQUAL_STRING_MESSAGE(expected, got[i], steps[i].keys);
-	}
+	TEST_ASSERT_EQUAL_STRING(expected, got);
 }
 
 /** @brief A path that can't be loaded prints "notvim: <path>: ..." and exits 1. */
@@ -1045,5 +1030,4 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_three_byte_text);
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_four_byte_text);
 	RUN_TEST(test_notvim_navigates_by_character_with_keys_and_arrows);
-	RUN_TEST(test_notvim_cursor_moves_by_character_over_utf8_text);
 }
