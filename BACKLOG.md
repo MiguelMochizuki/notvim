@@ -19,25 +19,15 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H4.1** As user, I want to save with `:w`, so I don't lose my work
-  - A missing file is created here, not on load (H1.4).
-  - An editor with 0 lines saves as an empty file, and one empty line as `"\n"` (H0.8).
-  - Loading never truncates, so saving a long file must write every line (H0.8).
-  - Linux default: a new file and any file that is not CRLF are saved with LF only, a CR is never added; only a file loaded as CRLF is written back with CRLF. Never convert silently.
-  - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
-  - Done so far, the command line: `:` in normal mode opens `EDITOR_MODE_COMMAND`; the text is a bounded `cmdline_t` (256 bytes), `cmd_parse()` splits name, `!` and argument. No command has behaviour yet.
-  - Design: a message (`editor_set_message()`, owned) replaces the status line in plain video until the next key; `editor_bottom_line()` gives the row: command line, else message, else status.
-  - Decisions: Backspace on an empty command line and Esc cancel, as Vim does (checked); `:` in insert mode types a colon; Ctrl+Q quits in every mode; every non-empty command shows `E492: Not an editor command: <text>` for now.
-  - Known gaps: a command line wider than the terminal is cut on the right, the cursor on the last column (Vim scrolls it); no history, no editing inside the line, Tab is ignored; the message is one row.
+- **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
+  - Done so far: the command line, the dispatcher (`src/commands.c`), `:w` (H4.1) and `modified`; `:q`, `:q!`, `:wq`, `:x` still show `E492`.
+  - Decisions: Backspace on an empty command line and Esc cancel, as Vim does (checked); `:` in insert mode types a colon; Ctrl+Q quits in every mode.
+  - Known gaps: a command line wider than the terminal is cut on the right (Vim scrolls it); no history, no editing inside the line; Ctrl+Q ignores `[+]`.
 
 ## To do
 
-Order of work: H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
-
-### H4 Saving and quitting
-
-- **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
 
 ### H2 Navigation
 
@@ -118,6 +108,14 @@ Do these once insert mode and yank exist.
   - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
 
 ## Done
+
+### H4 Saving and quitting
+
+- **H4.1** As user, I want to save with `:w`, so I don't lose my work
+  - Design: `editor_write_file()` (`src/writer.c`) writes a temp file in the target directory (`mkstemp`), `fsync`, `rename`; the dispatcher is `commands_run()` in `src/commands.c`.
+  - Decisions: LF only unless loaded as CRLF; a lone CR and invalid bytes are written as stored; a missing final newline is added (Vim does, checked); a symlink is written through.
+  - Decisions: `:w name` adopts the name only when there is no path, and writing to another name leaves `[+]`, as in Vim; message `"name" [New] [dos] 12L, 345B written`; `:w!` is `:w`.
+  - Known gaps: hard links are lost by the rename; no `fsync` of the directory; no backup file; owner and group of an existing file are not kept.
 
 ### H3 Insert mode
 
