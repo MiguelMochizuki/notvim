@@ -3,6 +3,8 @@
 ## In progress
 
 - H2.3: As user, I want the screen to scroll when the cursor leaves the visible area, so I can reach every line of a file longer than the terminal
+> Design (H2.3): `editor_t` gets `rowoff`, the index of the first visible line. `editor_scroll(e, rows)` keeps the cursor inside `[rowoff, rowoff + rows)` by changing only `rowoff`; `editor_render` starts at `rowoff`; `editor_draw` puts the cursor on row `cy - rowoff + 1`; `main` calls `editor_scroll` after every move; loading resets `rowoff` to 0. Steps: (1) the editor functions with unit tests, (2) `main` wiring with a pty test on a short terminal.
+> Decisions (H2.3): vertical scrolling only, one line at a time (no half-page jumps or `scrolloff` margin); no horizontal scrolling, so long lines are still cut by the draw buffer (see H1.4). `editor_draw` does not scroll by itself, so it stays a pure function of the editor state. Rows reserved for a status line (H5.1) are not subtracted yet.
 
 ## To do
 
