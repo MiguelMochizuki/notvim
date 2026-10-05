@@ -9,7 +9,8 @@ Early development: notvim is a **read-only viewer** for now. It opens a file, sh
 
 What works today:
 
-- Opening a file given on the command line and showing its lines, up to the terminal height
+- Opening a file given on the command line and showing its lines, up to the terminal height minus the status line
+- A status line on the last row: file name (or `[No Name]`), `[dos]` for a CRLF file, the mode (`NORMAL`) and `line,col` at the right
 - Moving the cursor and scrolling vertically when it leaves the screen
 - Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit
 - Lines wider than the terminal are clipped, so nothing wraps and scrolls the screen (except double-width characters, see Known limitations)
@@ -21,14 +22,17 @@ Keys:
 | `←` `↓` `↑` `→` or `h` `j` `k` `l` | Move the cursor (it never wraps or leaves the text) |
 | `Ctrl+Q` | Quit |
 
+The last row is the status line: `name [dos] NORMAL` on the left, `line,col` (display column) on the right. On a narrow terminal the position stays and the rest is cut from the right (mode first).
+
 ## Roadmap
 
 The full list of stories, with the design decisions behind them, is in [BACKLOG.md](BACKLOG.md). In short:
 
 | Next | Stories |
 |------|---------|
-| In progress | A status line with file name, mode and cursor position |
-| Editing core | Insert mode (`i`, `Esc`), typing, `Backspace` and `Enter`, saving with `:w`, quitting with `:q` and `:q!` |
+| Done | A status line with file name, mode and cursor position |
+| In progress | Insert mode (`i`, `Esc`) |
+| Editing core | Typing, `Backspace` and `Enter`, saving with `:w`, quitting with `:q` and `:q!` |
 | Navigation | Scrolling long lines horizontally; double-width characters |
 | Vim motions | `0 ^ $`, `w b e`, `gg G`, counts, page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
@@ -78,7 +82,7 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail `make tes
 
 - `src/main.c`: entry point (argument, raw mode, input loop, key mapping, redraw after each move).
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
-  the cursor and vertical scrolling, loading a file, rendering and drawing a window of rows and columns.
+  the cursor and vertical scrolling, loading a file, the path it was loaded from, the status line, rendering and drawing the screen.
 - `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows, a lone Esc after a timeout).
 - `src/stopsig.c`, `include/stopsig.h`: catching SIGINT, SIGTERM and SIGHUP through a pipe, so the terminal is restored.
 - `src/terminal.c`, `include/terminal.h`: raw mode, alternate screen and terminal size.
