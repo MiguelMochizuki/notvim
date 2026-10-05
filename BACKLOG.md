@@ -19,22 +19,20 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode
-  - Reuse the line helpers of `editor.c` (`line_insert()`); add delete, split and join next to it. Both set `modified`.
-
-## To do
-
-Order of work: H3.3, H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
-Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
-
-### H4 Saving and quitting
-
 - **H4.1** As user, I want to save with `:w`, so I don't lose my work
   - A missing file is created here, not on load (H1.4).
   - An editor with 0 lines saves as an empty file, and one empty line as `"\n"` (H0.8).
   - Loading never truncates, so saving a long file must write every line (H0.8).
   - Linux default: a new file and any file that is not CRLF are saved with LF only, a CR is never added; only a file loaded as CRLF is written back with CRLF. Never convert silently.
   - Saving must honour `editor_t.crlf` (write `\r\n` after each line when set, `\n` otherwise) and write back invalid UTF-8 bytes unchanged (H6.8, H6.9).
+
+## To do
+
+Order of work: H4.1 and H4.2, H2.5, then H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
+
+### H4 Saving and quitting
+
 - **H4.2** As user, I want to quit with `:q`, refused when there are unsaved changes, with `:q!` to force
 
 ### H2 Navigation
@@ -119,6 +117,11 @@ Do these once insert mode and yank exist.
 
 ### H3 Insert mode
 
+- **H3.3** As user, I want `Backspace` and `Enter` to work in insert mode (and `Delete`)
+  - Design: `line_remove()`, `line_split()` and `line_join()` sit beside `line_insert()`; join reuses it to append, so the NUL is copied. The decoder reports `ESC [ 3 ~` as `KEY_DELETE`.
+  - Decisions: checked against Vim 9.1: Enter puts the cursor at the start of the new line (an empty editor gets two lines); Backspace and Delete at a line edge join and leave the cursor at the join.
+  - Decisions: Backspace at the start of the text and Delete at its end do nothing and do not redraw. Enter is 0x0d or 0x0a, Backspace 0x7f or 0x08. The three keys do nothing in normal mode yet.
+  - Known gaps: no autoindent; a line ending in invalid bytes joins as is; `Delete` swallowed with modifiers (`ESC [ 3 ; 5 ~`) does nothing.
 - **H3.2** As user, I want to type characters in insert mode and see them in the buffer
   - Design: `line_insert()` grows a line with `realloc` and sets the new `editor_t.modified` flag (cleared by load); `type_char()` creates the first line of an empty editor and moves `cx` and `wantcol`.
   - Design: a UTF-8 character arrives as consecutive key bytes; `editor_t.pend` and `pend_len` collect it and only a complete valid one is inserted. The status line adds ` [+]` after the name and `[dos]`.
