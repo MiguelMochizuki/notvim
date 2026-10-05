@@ -3,10 +3,14 @@
  * @brief Unit tests for editor.c.
  */
 #include <stdio.h>
+#include <errno.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include "unity.h"
 #include "test_editor.h"
 #include "editor.h"
+#include "tmpdir.h"
 
 /** @brief Ctrl+Q makes editor_should_exit() return 1. */
 static void test_editor_should_exit_on_ctrl_q(void) {
@@ -211,6 +215,120 @@ static void test_editor_render_zero_size_returns_zero(void) {
 	editor_free(&e);
 }
 
+/** @brief File with three lines is correctly loaded into editor */
+static void test_editor_load_three_lines(void) {
+	const char *path = tmpdir_write("testfile.txt", "line1\nline2\nline3\n");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "line1");
+	assert_line(&e, 1, "line2");
+	assert_line(&e, 2, "line3");
+	editor_free(&e);
+}
+
+/** @brief A last line without a trailing newline is loaded whole. */
+static void test_editor_load_no_trailing_newline(void) {
+	const char *path = tmpdir_write("testfile.txt", "ab\ncd");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	assert_line(&e, 0, "ab");
+	assert_line(&e, 1, "cd");
+	editor_free(&e);
+}
+
+/** @brief An empty file loads with no lines. */
+static void test_editor_load_empty_file(void) {
+	const char *path = tmpdir_write("empty.txt", "");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	editor_free(&e);
+}
+
+/** @brief A blank line in the middle is kept as an empty line. */
+static void test_editor_load_blank_line_in_the_middle(void) {
+	const char *path = tmpdir_write("blank.txt", "a\n\nb\n");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(3, editor_line_count(&e));
+	assert_line(&e, 0, "a");
+	assert_line(&e, 1, "");
+	assert_line(&e, 2, "b");
+	editor_free(&e);
+}
+
+/** @brief Loading again replaces the previous contents. */
+static void test_editor_load_twice_replaces_contents(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("one.txt", "a\nb\n")));
+	TEST_ASSERT_EQUAL_UINT(2, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_write("two.txt", "c\n")));
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "c");
+	editor_free(&e);
+}
+
+/** @brief A missing file succeeds with an empty editor and is not created. */
+static void test_editor_load_missing_file_is_empty_and_not_created(void) {
+	const char *path = tmpdir_path("nope.txt");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	struct stat st;
+	TEST_ASSERT_EQUAL_INT(-1, stat(path, &st));
+	TEST_ASSERT_EQUAL_INT(ENOENT, errno);
+	editor_free(&e);
+}
+
+/** @brief Loading a missing file into a non-empty editor empties it. */
+static void test_editor_load_missing_file_discards_old_contents(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "old"));
+	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, tmpdir_path("nope.txt")));
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	editor_free(&e);
+}
+
+/** @brief A directory as the path fails with EISDIR and leaves the editor empty. */
+static void test_editor_load_directory_fails_with_eisdir(void) {
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "old"));
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, tmpdir_path(".")));
+	TEST_ASSERT_EQUAL_INT(EISDIR, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	editor_free(&e);
+}
+
+/** @brief An unreadable file fails with EACCES and leaves the editor empty. */
+static void test_editor_load_unreadable_file_fails_with_eacces(void) {
+	const char *path = tmpdir_write("secret.txt", "x\n");
+	TEST_ASSERT_NOT_NULL(path);
+	TEST_ASSERT_EQUAL_INT(0, chmod(path, 0));
+	if (geteuid() == 0) TEST_IGNORE_MESSAGE("root can read any file");
+	editor_t e;
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "old"));
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	TEST_ASSERT_EQUAL_INT(EACCES, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	editor_free(&e);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -231,4 +349,13 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_truncates_on_small_buffer);
 	RUN_TEST(test_editor_render_truncates_across_lines);
 	RUN_TEST(test_editor_render_zero_size_returns_zero);
+	RUN_TEST(test_editor_load_three_lines);
+	RUN_TEST(test_editor_load_no_trailing_newline);
+	RUN_TEST(test_editor_load_empty_file);
+	RUN_TEST(test_editor_load_blank_line_in_the_middle);
+	RUN_TEST(test_editor_load_twice_replaces_contents);
+	RUN_TEST(test_editor_load_missing_file_is_empty_and_not_created);
+	RUN_TEST(test_editor_load_missing_file_discards_old_contents);
+	RUN_TEST(test_editor_load_directory_fails_with_eisdir);
+	RUN_TEST(test_editor_load_unreadable_file_fails_with_eacces);
 }

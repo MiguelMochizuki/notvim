@@ -78,4 +78,19 @@ int editor_append_line(editor_t *e, const char *text);
  */
 size_t editor_render(const editor_t *e, char *out, size_t out_size);
 
+/**
+ * @brief Load the file at @p path into @p e, replacing its contents.
+ *
+ * If @p path does not exist, @p e is left empty and the call succeeds. As in
+ * Vim, the file is not created here; it is only created when saved.
+ * Each '\n' ends a line and a final newline does not add an empty line, so
+ * an empty file gives no lines.
+ *
+ * @param e    Editor to load into; must not be NULL. Left empty on error.
+ * @param path Path of the file to load.
+ * @return 0 on success (including a nonexistent file), -1 on any other
+ *         error (errno is set).
+ */
+int editor_load_file(editor_t *e, const char *path);
+
 #endif

@@ -2,8 +2,11 @@
  * @file editor.c
  * @brief Implementation of editor.h. Public symbols are documented there.
  */
+#define _POSIX_C_SOURCE 200809L /* getline under -std=c11 */
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include "editor.h"
 
 int editor_should_exit(char c) {
@@ -68,4 +71,35 @@ size_t editor_render(const editor_t *e, char *out, size_t out_size) {
 	}
 	out[pos] = '\0';
 	return pos;
+}
+
+int editor_load_file(editor_t *e, const char *path) {
+	editor_free(e); /* drop any previous contents */
+
+	FILE *fp = fopen(path, "r");
+	if (!fp) {
+		return errno == ENOENT ? 0 : -1; /* Nonexistent file is not an error */
+	}
+
+	char *line = NULL;
+	size_t cap = 0;
+	ssize_t n;
+	int rc = 0;
+	while ((n = getline(&line, &cap, fp)) >= 0) {
+		if (line[n - 1] == '\n') line[n - 1] = '\0';
+		if (editor_append_line(e, line) < 0) {
+			rc = -1;
+			break;
+		}
+	}
+	if (rc == 0 && ferror(fp)) rc = -1;
+
+	int saved = errno;
+	free(line);
+	fclose(fp);
+	if (rc < 0) {
+		editor_free(e);
+	}
+	errno = saved;
+	return rc;
 }
