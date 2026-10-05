@@ -13,8 +13,12 @@ enum {
 	KEY_UP = 256, /**< Arrow up: ESC [ A. */
 	KEY_DOWN,     /**< Arrow down: ESC [ B. */
 	KEY_RIGHT,    /**< Arrow right: ESC [ C. */
-	KEY_LEFT      /**< Arrow left: ESC [ D. */
+	KEY_LEFT,     /**< Arrow left: ESC [ D. */
+	KEY_ESC       /**< A lone Esc: ESC with nothing after it for KEY_ESC_TIMEOUT_MS. */
 };
+
+/** How long to wait for the rest of an escape sequence after ESC, in milliseconds. */
+#define KEY_ESC_TIMEOUT_MS 50
 
 /** Decoder state between bytes; start it with key_parser_init(). */
 typedef struct {
@@ -35,7 +39,7 @@ void key_parser_init(key_parser_t *p);
  * sequence (with parameters such as ESC [ 3 ~, or ESC followed by a byte
  * other than '[') is swallowed. A second ESC restarts a sequence. A lone ESC
  * cannot be told apart from the start of a sequence, so it is only reported
- * as KEY_NONE.
+ * as KEY_NONE until key_parser_timeout() says that nothing else is coming.
  *
  * @param p Parser state; must not be NULL.
  * @param c Next byte read from the terminal.
@@ -43,5 +47,30 @@ void key_parser_init(key_parser_t *p);
  *         KEY_NONE if more bytes are needed or the sequence was swallowed.
  */
 int key_parser_feed(key_parser_t *p, unsigned char c);
+
+/**
+ * @brief Tell whether the decoder is in the middle of an escape sequence.
+ *
+ * While it is, the caller should wait for the next byte for at most
+ * KEY_ESC_TIMEOUT_MS and call key_parser_timeout() if none arrives; otherwise
+ * it can wait without limit.
+ *
+ * @param p Parser state; must not be NULL.
+ * @return Non-zero after ESC or ESC [ (and parameters); 0 otherwise.
+ */
+int key_parser_pending(const key_parser_t *p);
+
+/**
+ * @brief Report that no byte arrived within KEY_ESC_TIMEOUT_MS.
+ *
+ * After a lone ESC the key is KEY_ESC. In the middle of a longer sequence
+ * (ESC [ ...) the sequence is abandoned. Either way the decoder is back in
+ * its initial state.
+ *
+ * @param p Parser state; must not be NULL.
+ * @return KEY_ESC after a lone ESC; KEY_NONE otherwise, including when the
+ *         decoder was idle.
+ */
+int key_parser_timeout(key_parser_t *p);
 
 #endif

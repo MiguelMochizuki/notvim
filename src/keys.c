@@ -55,3 +55,13 @@ int key_parser_feed(key_parser_t *p, unsigned char c) {
 		return KEY_NONE;
 	}
 }
+
+int key_parser_pending(const key_parser_t *p) {
+	return p->state != ST_NORMAL;
+}
+
+int key_parser_timeout(key_parser_t *p) {
+	int was_lone_escape = p->state == ST_ESC;
+	p->state = ST_NORMAL; /* a lone ESC is a key, a longer sequence is abandoned */
+	return was_lone_escape ? KEY_ESC : KEY_NONE;
+}

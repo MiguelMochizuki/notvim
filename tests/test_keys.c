@@ -94,6 +94,64 @@ static void test_keys_control_byte_inside_sequence_aborts_it(void) {
 	TEST_ASSERT_EQUAL_INT('a', feed(&p, "a"));
 }
 
+/** @brief The decoder is pending only while it is inside an escape sequence. */
+static void test_keys_pending_only_inside_a_sequence(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	feed(&p, "\x1b");
+	TEST_ASSERT_TRUE(key_parser_pending(&p));
+	feed(&p, "[");
+	TEST_ASSERT_TRUE(key_parser_pending(&p));
+	feed(&p, "1;");
+	TEST_ASSERT_TRUE(key_parser_pending(&p));
+	feed(&p, "5C"); /* the sequence ends here, swallowed */
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	feed(&p, "\x1b[A");
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	feed(&p, "\x1bx"); /* ESC and another byte: swallowed */
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	feed(&p, "a");
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+}
+
+/** @brief A timeout after a lone ESC is the Esc key, and the next key works normally. */
+static void test_keys_timeout_after_lone_escape_is_esc(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b"));
+	TEST_ASSERT_EQUAL_INT(KEY_ESC, key_parser_timeout(&p));
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	TEST_ASSERT_EQUAL_INT('j', feed(&p, "j"));
+}
+
+/** @brief A timeout in the middle of ESC [ abandons the sequence instead of reporting Esc. */
+static void test_keys_timeout_inside_a_sequence_abandons_it(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b["));
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, key_parser_timeout(&p));
+	TEST_ASSERT_FALSE(key_parser_pending(&p));
+	TEST_ASSERT_EQUAL_INT('j', feed(&p, "j"));
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, feed(&p, "\x1b[1;"));
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, key_parser_timeout(&p));
+	TEST_ASSERT_EQUAL_INT('j', feed(&p, "j"));
+}
+
+/** @brief A timeout while idle changes nothing. */
+static void test_keys_timeout_when_idle_does_nothing(void) {
+	key_parser_t p;
+	key_parser_init(&p);
+	TEST_ASSERT_EQUAL_INT(KEY_NONE, key_parser_timeout(&p));
+	TEST_ASSERT_EQUAL_INT('a', feed(&p, "a"));
+}
+
+/** @brief KEY_ESC is not a byte value, so it cannot be mistaken for an ordinary key. */
+static void test_keys_esc_is_not_a_byte(void) {
+	TEST_ASSERT_TRUE(KEY_ESC > 255);
+	TEST_ASSERT_TRUE(KEY_ESC != KEY_UP && KEY_ESC != KEY_DOWN && KEY_ESC != KEY_LEFT && KEY_ESC != KEY_RIGHT);
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_keys_suite(void) {
 	RUN_TEST(test_keys_plain_byte_passes_through);
@@ -105,4 +163,9 @@ void test_keys_suite(void) {
 	RUN_TEST(test_keys_escape_then_other_byte_is_swallowed);
 	RUN_TEST(test_keys_second_escape_restarts_the_sequence);
 	RUN_TEST(test_keys_control_byte_inside_sequence_aborts_it);
+	RUN_TEST(test_keys_pending_only_inside_a_sequence);
+	RUN_TEST(test_keys_timeout_after_lone_escape_is_esc);
+	RUN_TEST(test_keys_timeout_inside_a_sequence_abandons_it);
+	RUN_TEST(test_keys_timeout_when_idle_does_nothing);
+	RUN_TEST(test_keys_esc_is_not_a_byte);
 }
