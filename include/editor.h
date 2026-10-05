@@ -109,7 +109,8 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * @brief Render @p max_rows lines, starting at the first visible line, into @p out as a NUL-terminated string.
  *
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
- * turns off output processing. A blank line counts as a row. A control byte
+ * turns off output processing. A blank line counts as a row. A tab is drawn
+ * as spaces up to the next multiple of 8 columns (cut at the right edge). A control byte
  * (below 0x20 except tab, or 0x7f) is drawn as a two-column mark such as ^[
  * or ^?, so that a file can never send commands to the terminal; clipping
  * never shows half of a mark. Output is
@@ -153,7 +154,8 @@ int editor_load_file(editor_t *e, const char *path);
  * The output clears the screen and moves home, then holds editor_render() of
  * @p max_rows lines from @c rowoff, then moves the cursor to row
  * cy-rowoff+1 (row 1 if the cursor is above the window), at the display
- * column of cx plus 1 (marks are two columns wide). It
+ * column of cx plus 1 (marks are two columns wide and a tab goes to the next
+ * tab stop; the cursor is on the first column of a mark or tab). It
  * does not scroll: call editor_scroll() first. The cursor sequence is always complete: if @p out_size is too small
  * the text is cut, and if it is smaller than EDITOR_DRAW_OVERHEAD nothing is
  * written. A cursor below the window is reported at its real row and the

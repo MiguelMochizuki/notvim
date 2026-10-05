@@ -765,6 +765,54 @@ static void test_editor_draw_cursor_column_counts_marks(void) {
 	assert_draw(24, CLEAR_HOME "^Abc" "\x1b[1;4H");
 }
 
+/** @brief A tab is drawn as spaces up to the next multiple of 8 columns. */
+static void test_editor_render_expands_tabs_to_the_next_tab_stop(void) {
+	editor_init(&e);
+	append("\tx");
+	append("ab\tc");
+	append("abcdefg\tx");
+	append("abcdefgh\tx");
+	char out[256];
+	editor_render(&e, ALL_ROWS, ALL_COLS, out, sizeof(out));
+	TEST_ASSERT_EQUAL_STRING("        x\r\nab      c\r\nabcdefg x\r\nabcdefgh        x", out);
+}
+
+/** @brief A tab after a mark counts the two columns of the mark. */
+static void test_editor_render_tab_after_a_mark(void) {
+	editor_init(&e);
+	append("\x01\tx");
+	assert_render_cols(ALL_COLS, "^A      x");
+}
+
+/** @brief A tab that does not fit is cut to the columns that are left, and nothing follows it. */
+static void test_editor_render_clips_a_tab(void) {
+	editor_init(&e);
+	append("\tx");
+	assert_render_cols(5, "     ");
+	assert_render_cols(8, "        ");
+	assert_render_cols(9, "        x");
+}
+
+/** @brief The cursor is on the first column of a tab, and after it at the next tab stop. */
+static void test_editor_draw_cursor_column_with_tabs(void) {
+	editor_init(&e);
+	append("\tx");
+	e.cx = 0;
+	assert_draw(24, CLEAR_HOME "        x" "\x1b[1;1H");
+	e.cx = 1;
+	assert_draw(24, CLEAR_HOME "        x" "\x1b[1;9H");
+}
+
+/** @brief After a tab that starts past column 0 the cursor is at the next tab stop, not 8 columns further. */
+static void test_editor_draw_cursor_column_after_a_tab_in_the_middle(void) {
+	editor_init(&e);
+	append("ab\tc");
+	e.cx = 3; /* the c: "ab" is 2 columns, the tab goes to column 8 */
+	assert_draw(24, CLEAR_HOME "ab      c" "\x1b[1;9H");
+	e.cx = 2; /* the tab itself starts at column 2 */
+	assert_draw(24, CLEAR_HOME "ab      c" "\x1b[1;3H");
+}
+
 /** @brief Register every test in this file with Unity. */
 void test_editor_suite(void) {
 	RUN_TEST(test_editor_should_exit_on_ctrl_q);
@@ -797,6 +845,11 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_render_leaves_high_bytes_alone);
 	RUN_TEST(test_editor_render_clips_on_whole_marks);
 	RUN_TEST(test_editor_draw_cursor_column_counts_marks);
+	RUN_TEST(test_editor_render_expands_tabs_to_the_next_tab_stop);
+	RUN_TEST(test_editor_render_tab_after_a_mark);
+	RUN_TEST(test_editor_render_clips_a_tab);
+	RUN_TEST(test_editor_draw_cursor_column_with_tabs);
+	RUN_TEST(test_editor_draw_cursor_column_after_a_tab_in_the_middle);
 	RUN_TEST(test_editor_load_three_lines);
 	RUN_TEST(test_editor_load_no_trailing_newline);
 	RUN_TEST(test_editor_load_empty_file);

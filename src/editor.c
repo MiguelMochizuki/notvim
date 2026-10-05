@@ -98,36 +98,48 @@ void editor_move_cursor(editor_t *e, editor_move_t dir) {
 	if (e->cx > last_col(e, e->cy)) e->cx = last_col(e, e->cy);
 }
 
-/** @brief Whether byte @p c is a control byte, which is drawn as a mark. Tabs are left alone for now. */
+/** Tabs stop at every multiple of this many columns. */
+#define TAB_STOP 8
+
+/** @brief Whether byte @p c is a control byte, which is drawn as a mark. A tab is not: it is drawn as spaces. */
 static int is_control(unsigned char c) {
 	return (c < 0x20 && c != '\t') || c == 0x7f;
 }
 
-/** @brief Width in columns of byte @p c as drawn: a control byte is a two-column mark such as ^A. */
-static size_t cell_width(unsigned char c) {
+/** @brief Width in columns of byte @p c drawn at column @p col: a tab goes to the next tab stop, a mark such as ^A is two. */
+static size_t cell_width(unsigned char c, size_t col) {
+	if (c == '\t') return TAB_STOP - col % TAB_STOP;
 	return is_control(c) ? 2 : 1;
 }
 
 /** @brief Display column of byte index @p cx in @p line: the width of the bytes before it. */
 static size_t display_col(const char *line, size_t cx) {
 	size_t col = 0;
-	for (size_t i = 0; i < cx && line[i]; i++) col += cell_width((unsigned char)line[i]);
+	for (size_t i = 0; i < cx && line[i]; i++) col += cell_width((unsigned char)line[i], col);
 	return col;
 }
 
 /** @brief Append @p line to @p out at *pos as drawn, clipped to @p max_cols columns without cutting a mark. */
 static void put_line(const char *line, size_t max_cols, char *out, size_t *pos, size_t max) {
+	static const char spaces[TAB_STOP + 1] = "        ";
 	size_t col = 0;
 	for (const unsigned char *p = (const unsigned char *)line; *p; p++) {
-		size_t w = cell_width(*p);
-		if (w > max_cols - col) break;
-		if (is_control(*p)) {
+		size_t w = cell_width(*p, col);
+		size_t room = max_cols - col;
+		if (*p == '\t') {
+			size_t n = w < room ? w : room; /* spaces can be cut anywhere */
+			put(out, pos, max, spaces, n);
+			col += n; /* if the tab was cut, col == max_cols and the loop ends below */
+		} else if (w > room) {
+			break; /* never show half of a mark */
+		} else if (is_control(*p)) {
 			char mark[2] = { '^', *p == 0x7f ? '?' : (char)(*p ^ 0x40) };
 			put(out, pos, max, mark, 2);
+			col += w;
 		} else {
 			put(out, pos, max, (const char *)p, 1);
+			col += w;
 		}
-		col += w;
 	}
 }
 

@@ -229,6 +229,33 @@ static void test_notvim_shows_escape_sequences_in_a_file_as_text(void) {
 	TEST_ASSERT_NULL(strstr(first_clear + 1, "\x1b[2J"));
 }
 
+/** @brief Lines full of tabs fill exactly the screen: they no longer wrap and scroll it. */
+static void test_notvim_tabs_do_not_overflow_the_screen(void) {
+	char content[1024] = "";
+	char text[2048] = "";
+	char blanks[81];
+	memset(blanks, ' ', 80);
+	blanks[80] = '\0';
+	for (int i = 0; i < 24; i++) {
+		strcat(content, "\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\t\tx\n"); /* 20 tabs: 160 columns */
+		if (i > 0) strcat(text, "\r\n");
+		strcat(text, blanks); /* clipped to the 80 columns of the terminal */
+	}
+	const char *path = tmpdir_write("tabs.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[4096], expected[4096];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
 /** @brief A missing file starts an empty editor, draws an empty screen and is not created. */
 static void test_notvim_missing_file_starts_empty_and_is_not_created(void) {
 	const char *path = tmpdir_path("new.txt");
@@ -512,6 +539,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_ordinary_key_does_not_redraw);
 	RUN_TEST(test_notvim_clips_long_lines_to_the_terminal_width);
 	RUN_TEST(test_notvim_shows_escape_sequences_in_a_file_as_text);
+	RUN_TEST(test_notvim_tabs_do_not_overflow_the_screen);
 	RUN_TEST(test_notvim_missing_file_starts_empty_and_is_not_created);
 	RUN_TEST(test_notvim_leaves_the_alternate_screen_on_exit);
 	RUN_TEST(test_notvim_refuses_a_binary_file);
