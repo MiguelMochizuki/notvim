@@ -3,7 +3,9 @@
  * @brief Tests of the pure motions (motions.c) and of the normal-mode keys that apply them (editor.c).
  */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 #include "unity.h"
 #include "test_motions.h"
 #include "editor.h"
@@ -913,6 +915,27 @@ static void test_page_keys_use_the_latest_window_height(void) {
 	TEST_ASSERT_EQUAL_UINT(5, e.winrows);
 }
 
+/** @brief Backward motions on a 200,000 character line take linear time: the alarm kills the run if one key is quadratic. */
+static void test_backward_motions_on_a_very_long_line_are_fast(void) {
+	enum { LEN = 200000 };
+	char *line = malloc(LEN + 1);
+	TEST_ASSERT_NOT_NULL(line);
+	memset(line, 'a', LEN);
+	line[LEN] = '\0';
+	editor_free(&e);
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, line));
+	free(line);
+	e.cx = LEN - 1;
+	alarm(5);
+	int found = 1;
+	motion_char_find(&e, "z", 0, 0, 1, 0, &found);
+	TEST_ASSERT_EQUAL_INT(0, found);
+	motion_pos_t p = motion_word_prev(&e, 0);
+	alarm(0);
+	TEST_ASSERT_EQUAL_UINT(0, p.x);
+}
+
 /** @brief Page keys are normal mode only: in insert mode they are dropped as other control keys, in command mode ignored; Ctrl+Q still quits. */
 static void test_page_keys_are_normal_mode_only(void) {
 	page(100, 10, 0, 0);
@@ -1461,6 +1484,7 @@ void test_motions_suite(void) {
 	RUN_TEST(test_page_keys_put_the_cursor_on_the_first_non_blank);
 	RUN_TEST(test_page_keys_need_a_window_height_and_lines);
 	RUN_TEST(test_page_keys_use_the_latest_window_height);
+	RUN_TEST(test_backward_motions_on_a_very_long_line_are_fast);
 	RUN_TEST(test_page_keys_are_normal_mode_only);
 	RUN_TEST(test_page_keys_end_a_pending_command_and_leave_the_window_alone);
 	RUN_TEST(test_char_find_matches_vim);

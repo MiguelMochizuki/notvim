@@ -222,6 +222,36 @@ static void test_utf8_prev_inside_a_character_gives_its_start(void) {
 }
 
 /** @brief Register every test in this file with Unity. */
+/** @brief The old utf8_prev(): walk forward from the start of the line, the definition of a cell. */
+static size_t reference_prev(const char *line, size_t i) {
+	size_t start = 0, pos = 0;
+	while (line[pos] && pos < i) {
+		start = pos;
+		pos += utf8_cell_len(line + pos);
+	}
+	return start;
+}
+
+/** @brief The constant time utf8_prev() agrees with the forward walk for every index of every string up to 5 bytes over a byte set that covers each UTF-8 boundary. */
+static void test_utf8_prev_agrees_with_the_forward_walk(void) {
+	static const unsigned char set[] = {'a', 0x7f, 0x80, 0xbf, 0xc0, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0xf5, 0xff, 0x90, 0xa0};
+	enum { N = sizeof set, MAXLEN = 5 };
+	for (size_t len = 1; len <= MAXLEN; len++) {
+		size_t total = 1;
+		for (size_t k = 0; k < len; k++) total *= N;
+		for (size_t code = 0; code < total; code++) {
+			char *s = malloc(len + 1);
+			TEST_ASSERT_NOT_NULL(s);
+			size_t c = code;
+			for (size_t k = 0; k < len; k++, c /= N) s[k] = (char)set[c % N];
+			s[len] = '\0';
+			for (size_t i = 0; i <= len; i++)
+				if (utf8_prev(s, i) != reference_prev(s, i)) TEST_FAIL_MESSAGE("utf8_prev differs from the forward walk");
+			free(s);
+		}
+	}
+}
+
 void test_utf8_suite(void) {
 	RUN_TEST(test_utf8_valid_len_ascii);
 	RUN_TEST(test_utf8_valid_len_multibyte);
@@ -238,4 +268,5 @@ void test_utf8_suite(void) {
 	RUN_TEST(test_utf8_prev_over_invalid_bytes_and_c1);
 	RUN_TEST(test_utf8_prev_with_a_stray_continuation_byte_after_a_character);
 	RUN_TEST(test_utf8_prev_inside_a_character_gives_its_start);
+	RUN_TEST(test_utf8_prev_agrees_with_the_forward_walk);
 }

@@ -37,10 +37,10 @@ int utf8_is_c1(const char *s) {
 }
 
 size_t utf8_prev(const char *line, size_t i) {
-	size_t start = 0, pos = 0;
-	while (line[pos] && pos < i) { /* cells are defined by decoding forward, so walk forward */
-		start = pos;
-		pos += utf8_cell_len(line + pos);
-	}
-	return start;
+	if (i == 0) return 0;
+	/* A byte that is not a continuation byte always starts a cell, and a cell has at most 4 bytes: look back at most 3 bytes for the lead */
+	size_t p = i - 1;
+	while (p > 0 && i - 1 - p < 3 && is_continuation((unsigned char)line[p])) p--;
+	if (is_continuation((unsigned char)line[p])) return i - 1; /* ran out of bytes: a stray continuation byte is its own cell */
+	return p + utf8_cell_len(line + p) > i - 1 ? p : i - 1; /* byte i - 1 is inside the cell at p, or stray after it */
 }
