@@ -221,7 +221,6 @@ static void test_utf8_prev_inside_a_character_gives_its_start(void) {
 	TEST_ASSERT_EQUAL_UINT(1, i4);
 }
 
-/** @brief Register every test in this file with Unity. */
 /** @brief The old utf8_prev(): walk forward from the start of the line, the definition of a cell. */
 static size_t reference_prev(const char *line, size_t i) {
 	size_t start = 0, pos = 0;
@@ -252,6 +251,7 @@ static void test_utf8_prev_agrees_with_the_forward_walk(void) {
 	}
 }
 
+/** @brief Register every test in this file with Unity. */
 void test_utf8_suite(void) {
 	RUN_TEST(test_utf8_valid_len_ascii);
 	RUN_TEST(test_utf8_valid_len_multibyte);
