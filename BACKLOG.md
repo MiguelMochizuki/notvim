@@ -21,7 +21,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ### H8 Motions (as in Vim)
 
-- **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
+- **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
 
 ## To do
 
@@ -56,9 +56,6 @@ Each story below was reproduced against the real binary on a pty or found by a r
   - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
 
 ### H8 Motions (as in Vim)
-
-- **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
-- **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
 
 ### H9 Editing commands (as in Vim)
 
@@ -119,6 +116,16 @@ Do these once insert mode and yank exist.
   - Decisions: digits `1`-`9` start a count and `0` continues it (alone it is the motion); counts are clamped to `EDITOR_COUNT_MAX`; `{n}$` goes n-1 lines down (fails on the last line, as Vim).
   - Decisions: `0` and `^` ignore the count; Esc or an unknown key cancels it; normal mode only; move keys always ask for a redraw. Data from the real Vim (`tests/counts_vim.inc`).
   - Known gaps: the pending count is not shown (Vim's showcmd); `3i`, `3:`, `3x` and other commands ignore or drop the count; the Vim data skips double-width characters (H6.12).
+- **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
+  - Design: glue in `editor.c` on the scroll state (`rowoff` and the cursor change together); the window height comes from `editor_set_window_height()`, called by `main` at startup and after every resize.
+  - Decisions: `Ctrl+f` and `Ctrl+b` move h-2 lines per count; `Ctrl+d` and `Ctrl+u` move `scroll` lines (a count sets it, default h/2); the cursor lands on the first non-blank (`startofline`) and `wantcol` follows.
+  - Decisions: ruling from Vim's documentation, because Vim's `-es` mode has a window height (`:split` and `:resize` set it) but does not scroll; a text that fits in the window does not scroll, normal mode only.
+  - Known gaps: no `Ctrl+e`, `Ctrl+y`, `zt`, `zz`; `scroll` is not an option; the exact top line after `Ctrl+f` near the end and on a short text is not checked against a real Vim screen.
+- **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
+  - Design: `motion_paragraph_next()`, `motion_paragraph_prev()` and `motion_bracket_match()` in `motions.c` are pure one-step targets; the key handler repeats `{` and `}` with the count.
+  - Decisions: a paragraph boundary is an empty line (blanks do not count); a count fails as a whole when a step before the last runs off the text (Vim's `findpar`); `%` ignores a count.
+  - Decisions: `%` takes the first bracket at or after the cursor on its line and counts only its own pair; data from the real Vim (`tests/blocks_vim.inc`).
+  - Known gaps: Vim's `%` also skips brackets inside double quotes and pairs `/*` with `*/` and `#if` with `#endif`; `{count}%` (go to a percentage of the file) is not done.
 
 ### H4 Saving and quitting
 
