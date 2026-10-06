@@ -24,6 +24,8 @@ Keys:
 | `0` `^` `$` | Normal mode: go to the start of the line, its first non-blank character, its last character (after `$`, `j` and `k` stay at the end of each line) |
 | `w` `b` `e` | Normal mode: next word start, previous word start, word end; a word is letters, digits and `_`, or a run of other non-blanks; an empty line is a word for `w` and `b`; they cross lines |
 | `W` `B` `E` | The same with a word being any run of non-blanks |
+| `{n}` before a motion | Normal mode: repeat `h j k l`, the arrows and the word motions n times, stopping at the ends of the text; `{n}$` goes n-1 lines down; `0` and `^` ignore it; `0` after a digit is part of the count; `Esc` or an unknown key cancels it |
+| `gg` `G` | Normal mode: go to the first and last line, on its first non-blank character; `{n}gg` and `{n}G` go to line n (the last if n is past the end); `g` and another key does nothing |
 | `i` | Enter insert mode at the cursor |
 | Any printable key, `Tab` | In insert mode: type it at the cursor (accented and other UTF-8 characters too) |
 | `Enter` | In insert mode: split the line at the cursor |
@@ -46,7 +48,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 |------|---------|
 | Done | A status line with file name, mode and cursor position; insert mode (`i`, `Esc`); typing; `Enter`, `Backspace` and `Delete`; the `:` command line; saving with `:w`; quitting with `:q`, `:q!`, `:wq`, `:x`, `ZZ`, `ZQ`; scrolling long lines horizontally |
 | Next | Hardening: double-width characters (H6.12) and the last robustness story (H6.13) |
-| Vim motions | Done: `0 ^ $`, `w b e W B E`. Next: `gg G`, counts, page scrolling, `% { }`, `f t F T` |
+| Vim motions | Done: `0 ^ $`, `w b e W B E`, counts, `gg G`. Next: page scrolling, `% { }`, `f t F T` |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
 | Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, command-line history and editing |
 | Mouse and clipboard | Wheel scrolling that keeps native selection, yanking to the system clipboard, bracketed paste |
@@ -61,6 +63,7 @@ The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 - `w b e` classify characters with a reduced copy of Vim's table: emoji, full-width forms and punctuation below U+2000 outside ASCII count as letters. There are no `Home` and `End` keys yet.
 - Invalid UTF-8 and C1 controls are shown as `?` (saved as they were).
 - A command line wider than the terminal is cut at the right edge; Vim scrolls it.
+- The count typed before a command is not shown (Vim shows it at the bottom right), and only motions, `gg` and `G` use it: `3i`, `3:` and the like ignore it.
 - A fast `Esc` followed by a key in the same write (within 50 ms) is read as an Alt chord and both keys are dropped; Vim treats it as `Esc` and then the key.
 - `:w` needs to create a temporary file next to the target, so a file in a directory you cannot write cannot be saved (Vim could fall back to writing in place).
 - A terminal of one row has no room for the command line or messages: `:q` is typed blind and an error is not shown.
