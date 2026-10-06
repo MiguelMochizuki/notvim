@@ -19,9 +19,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-### H8 Motions (as in Vim)
-
-- **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
+(nothing in progress)
 
 ## To do
 
@@ -54,8 +52,6 @@ Each story below was reproduced against the real binary on a pty or found by a r
   - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
   - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
   - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
-
-### H8 Motions (as in Vim)
 
 ### H9 Editing commands (as in Vim)
 
@@ -126,6 +122,11 @@ Do these once insert mode and yank exist.
   - Decisions: a paragraph boundary is an empty line (blanks do not count); a count fails as a whole when a step before the last runs off the text (Vim's `findpar`); `%` ignores a count.
   - Decisions: `%` takes the first bracket at or after the cursor on its line and counts only its own pair; data from the real Vim (`tests/blocks_vim.inc`).
   - Known gaps: Vim's `%` also skips brackets inside double quotes and pairs `/*` with `*/` and `#if` with `#endif`; `{count}%` (go to a percentage of the file) is not done.
+- **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
+  - Design: `motion_char_find()` in `motions.c` is a pure target (count, till, direction, repeat flag); the last search (`lastfind`: kind and character) lives in the editor; `f t F T` use the pending state.
+  - Decisions: the character is one complete UTF-8 character collected in `pend`; `Esc`, a special key or a bad byte cancels; a failed search keeps the cursor and `wantcol` but is still the last search (Vim data).
+  - Decisions: a repeated `t` or `T` with a count of 1 skips the adjacent match (default cpoptions); `;` and `,` do nothing before a first search; normal mode only; tab and control bytes are valid targets.
+  - Known gaps: no `cpoptions` `;` option, no digraphs after `f` (`Ctrl+k`), no `Ctrl+v` literal; the Vim values are in the tests, not in a generated data file; the epic H8 is complete.
 
 ### H4 Saving and quitting
 
