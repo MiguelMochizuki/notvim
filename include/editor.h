@@ -250,7 +250,7 @@ void editor_set_window_height(editor_t *e, size_t height);
  * 0 or no lines they do nothing). The ruling comes from Vim's documentation, because Vim's -es mode has a window height but does not scroll: "Ctrl+f" (0x06)
  * scrolls forward {count} pages of h - 2 lines (at least 1): @c rowoff grows by that, but never past the last line, and stays 0 if the whole text
  * fits in the window; the cursor goes to the first line of the window if it is above it. "Ctrl+b" (0x02) scrolls back the same, @c rowoff not below 0, and the cursor goes to the last
- * line of the window if it is below it. "Ctrl+d" (0x04) and "Ctrl+u" (0x15) scroll down and up @c scroll lines (a count sets it; with none set, h / 2, at least 1) and
+ * line of the new window (checked in a real Vim); at @c rowoff 0 or if the text fits in the window it does nothing, the cursor stays. "Ctrl+d" (0x04) and "Ctrl+u" (0x15) scroll down and up @c scroll lines (a count sets it; with none set, h / 2, at least 1) and
  * move the cursor the same number of lines; "Ctrl+d" scrolls at most until the last line is the last of the window and then only the cursor moves, "Ctrl+u" stops at @c rowoff 0 and
  * line 0; the cursor stops at the last and first line. After a page key the cursor is on the first non-blank of its line and @c wantcol is set from it ('startofline'). A key that
  * changes neither @c rowoff nor the cursor (already at an end) does nothing and returns 0; a changing one returns non-zero. They never set @c modified; in insert and command mode they are dropped as before.

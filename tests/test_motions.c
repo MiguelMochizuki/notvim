@@ -760,17 +760,23 @@ static void test_ctrl_f_scrolls_a_page_minus_two_lines(void) {
 	ASSERT_PAGE(1, 1);
 }
 
-/** @brief Ctrl+b scrolls back h - 2 lines and puts the cursor on the last line of the window if it is below it. */
+/** @brief Ctrl+b scrolls back h - 2 lines and puts the cursor on the last line of the new window, as Vim does (checked in a real Vim: top 22, cursor 44 after ^F^F^B). */
 static void test_ctrl_b_scrolls_a_page_back(void) {
 	page(100, 10, 50, 50);
 	TEST_ASSERT_EQUAL_INT(1, press(0x02));
-	ASSERT_PAGE(42, 50);
+	ASSERT_PAGE(42, 51);
 	page(100, 10, 50, 59);
 	press(0x02);
 	ASSERT_PAGE(42, 51);
-	page(100, 10, 5, 7);
+	page(100, 10, 5, 7); /* a cursor inside the new window goes to its last line too */
 	press(0x02);
-	ASSERT_PAGE(0, 7);
+	ASSERT_PAGE(0, 9);
+	page(100, 23, 21, 21); /* the 23-line window of a 24-row terminal: ^F then ^B */
+	press(0x02);
+	ASSERT_PAGE(0, 22);
+	page(100, 23, 42, 43); /* ^F^F^B: Vim top 22, cursor 44 (1-based) */
+	press(0x02);
+	ASSERT_PAGE(21, 43);
 	page(100, 5, 50, 54);
 	press(0x02);
 	ASSERT_PAGE(47, 51);
@@ -785,9 +791,12 @@ static void test_ctrl_f_and_ctrl_b_stop_at_the_buffer_ends(void) {
 	ASSERT_PAGE(99, 99);
 	page(100, 10, 3, 5);
 	TEST_ASSERT_EQUAL_INT(1, press(0x02));
-	ASSERT_PAGE(0, 5);
+	ASSERT_PAGE(0, 9);
+	TEST_ASSERT_EQUAL_INT(0, press(0x02)); /* already at the top: nothing moves, not even the cursor */
+	ASSERT_PAGE(0, 9);
+	page(100, 10, 0, 4);
 	TEST_ASSERT_EQUAL_INT(0, press(0x02));
-	ASSERT_PAGE(0, 5);
+	ASSERT_PAGE(0, 4);
 	page(1, 10, 0, 0);
 	TEST_ASSERT_EQUAL_INT(0, press(0x06));
 	TEST_ASSERT_EQUAL_INT(0, press(0x02));
@@ -795,13 +804,16 @@ static void test_ctrl_f_and_ctrl_b_stop_at_the_buffer_ends(void) {
 	TEST_ASSERT_EQUAL_INT(0, press(0x15));
 }
 
-/** @brief A buffer shorter than the window does not scroll: Ctrl+f goes to the last line, Ctrl+b to the first, Ctrl+d and Ctrl+u move the cursor only. */
+/** @brief A buffer shorter than the window does not scroll: Ctrl+f goes to the last line, Ctrl+b leaves the cursor (as Vim), Ctrl+d and Ctrl+u move the cursor only. */
 static void test_page_keys_on_a_buffer_shorter_than_the_window(void) {
 	page(5, 10, 0, 1);
 	press(0x06);
 	ASSERT_PAGE(0, 4);
-	press(0x02);
-	ASSERT_PAGE(0, 0);
+	TEST_ASSERT_EQUAL_INT(0, press(0x02));
+	ASSERT_PAGE(0, 4);
+	page(5, 10, 0, 2);
+	TEST_ASSERT_EQUAL_INT(0, press(0x02));
+	ASSERT_PAGE(0, 2);
 	page(5, 10, 0, 0);
 	press(0x04);
 	ASSERT_PAGE(0, 4);

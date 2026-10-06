@@ -655,8 +655,10 @@ static int page_key(editor_t *e, int key, size_t n) {
 			if (!fits) top = by > last - top ? last : top + by;
 			cy = fits ? last : cy < top ? top : cy;
 		} else {
-			if (!fits) top = by > top ? 0 : top - by;
-			cy = fits ? 0 : cy > top + h - 1 ? top + h - 1 : cy;
+			if (!fits && top) { /* as Vim: the cursor goes to the last line of the new window; at the top, or if the text fits, nothing moves */
+				top = by > top ? 0 : top - by;
+				cy = top + h - 1;
+			}
 		}
 	} else {
 		if (n) e->scroll = n;
