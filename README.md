@@ -99,6 +99,11 @@ Builds use AddressSanitizer and UBSan, so memory errors and leaks fail `make tes
 - `src/editor.c`, `include/editor.h`: the text as a growable array of lines,
   the modes, the key dispatch, the cursor and scrolling, loading a file, the path it was loaded from, the status line, rendering and drawing the screen.
 - `src/keys.c`, `include/keys.h`: decoding of input bytes into keys (arrows, a lone Esc after a timeout).
+- `src/utf8.c`, `include/utf8.h`: UTF-8 decoding (valid characters, invalid bytes, C1 controls).
+- `src/cmdline.c`, `include/cmdline.h`: the text of the `:` command line and the parser of a command (name, `!`, argument).
+- `src/commands.c`, `include/commands.h`: what the commands do (`:w`, `:q`, `:wq`, `:x`, ...) and the refusals (`E13`, `E37`, `E45`).
+- `src/writer.c`, `include/writer.h`: the atomic write of the buffer to a file, honouring LF/CRLF.
+- `src/winch.c`, `include/winch.h`: catching SIGWINCH through a pipe, so the screen follows a resize.
 - `src/stopsig.c`, `include/stopsig.h`: catching SIGINT, SIGTERM and SIGHUP through a pipe, so the terminal is restored.
 - `src/terminal.c`, `include/terminal.h`: raw mode, alternate screen and terminal size.
 - `tests/`: Unity tests, one file per module, plus `test_notvim.c`, which runs
