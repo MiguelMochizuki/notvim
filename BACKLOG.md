@@ -19,7 +19,9 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-(nothing in progress)
+### H8 Motions (as in Vim)
+
+- **H8.4** As user, I want counts before motions (`5j`, `3w`, `10l`)
 
 ## To do
 
@@ -55,10 +57,7 @@ Each story below was reproduced against the real binary on a pty or found by a r
 
 ### H8 Motions (as in Vim)
 
-- **H8.1** As user, I want `0`, `^` and `$` to go to the start, the first non-blank character and the end of the line
-- **H8.2** As user, I want `w`, `b` and `e` (and `W`, `B`, `E`) to move by words
 - **H8.3** As user, I want `gg` and `G` to go to the first and last line, and `{count}G` to go to a given line
-- **H8.4** As user, I want counts before motions (`5j`, `3w`, `10l`)
 - **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
 - **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
 - **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
@@ -99,6 +98,20 @@ Do these once insert mode and yank exist.
   - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
 
 ## Done
+
+### H8 Motions (as in Vim)
+
+- **H8.1** As user, I want `0`, `^` and `$` to go to the start, the first non-blank character and the end of the line
+  - Design: pure functions in `motions.c` return the target (line, byte) and move nothing, so the operators of H9 can reuse them; `goto_target` in `editor.c` applies it.
+  - `$` sets `wantcol` to `EDITOR_WANTCOL_EOL` (Vim's MAXCOL), so `j` and `k` keep to the end of each line.
+  - Decisions: every motion sets `wantcol` from the new column even when the cursor does not move (as Vim); `^` on a blank line goes to its last character.
+  - Normal mode only; motions never set `modified`. Targets are checked against the real Vim for every start position of 13 buffers (`tests/motions_vim.inc`).
+  - Known gaps: no `Home` and `End` keys (the decoder is unchanged); on a tab `wantcol` is the tab's first column (as `h` and `l` here), Vim uses its last.
+- **H8.2** As user, I want `w`, `b` and `e` (and `W`, `B`, `E`) to move by words
+  - Design: a port of Vim's `fwd_word`, `bck_word` and `end_word` over a cursor that also steps onto the NUL ending each line, so lines, empty lines and the text ends behave as in Vim.
+  - Decisions: classes are Vim's 'iskeyword' (ASCII word characters and U+00C0 and up) plus a reduced `utf_class`: spaces, punctuation and symbols, and Hiragana, Katakana, CJK and Hangul as classes of their own.
+  - Decisions: an invalid byte is classed as the character with that code; the Unicode spaces of Vim's table are blanks; an empty line is a word for `w` and `b`, not for `e`.
+  - Known gaps: Vim's full `utf_class` table (emoji, Arabic and other punctuation below U+2000, full-width forms) is not copied: they count as letters. Counts come with H8.4.
 
 ### H4 Saving and quitting
 
