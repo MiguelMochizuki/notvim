@@ -946,6 +946,477 @@ static void test_page_keys_end_a_pending_command_and_leave_the_window_alone(void
 	ASSERT_PAGE(13, 13);
 }
 
+/** @brief Fill the shared editor with the lines "a,b,c,d,e" and "x,y,,z" (the buffer the character search data of the real Vim 9.1 was taken from) and put the cursor at (@p y, @p x). */
+static void commas(size_t y, size_t x) {
+	editor_free(&e);
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "a,b,c,d,e"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "x,y,,z"));
+	e.cy = y;
+	e.cx = x;
+}
+
+/** @brief Fill the shared editor with a line of accents and a line with a tab and a control byte, and put the cursor at (0, @p x). */
+static void accents(size_t x) {
+	editor_free(&e);
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "h\xc3\xa9llo \xc3\xa9x \xc3\xa9"));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "ab\tcd\x01" "e"));
+	e.cy = 0;
+	e.cx = x;
+}
+
+/** @brief Assert that motion_char_find() from the cursor finds (@p want_y, @p want_x). */
+#define ASSERT_FIND(ch, fwd, till, count, rep, want_y, want_x) do { \
+	int f_ = -1; motion_pos_t t_ = motion_char_find(&e, ch, fwd, till, count, rep, &f_); \
+	TEST_ASSERT_EQUAL_INT(1, f_); TEST_ASSERT_EQUAL_UINT(want_y, t_.y); TEST_ASSERT_EQUAL_UINT(want_x, t_.x); } while (0)
+/** @brief Assert that motion_char_find() finds nothing and gives the cursor back. */
+#define ASSERT_NO_FIND(ch, fwd, till, count, rep) do { \
+	int f_ = -1; motion_pos_t t_ = motion_char_find(&e, ch, fwd, till, count, rep, &f_); \
+	TEST_ASSERT_EQUAL_INT(0, f_); TEST_ASSERT_EQUAL_UINT(e.cy, t_.y); TEST_ASSERT_EQUAL_UINT(e.cx, t_.x); } while (0)
+
+/** @brief The pure f, t, F and T on "a,b,c,d,e" give what the real Vim 9.1 gives, with counts, and move nothing. */
+static void test_char_find_matches_vim(void) {
+	commas(0, 0);
+	ASSERT_FIND("c", 1, 0, 1, 0, 0, 4);
+	ASSERT_FIND(",", 1, 0, 1, 0, 0, 1);
+	ASSERT_FIND(",", 1, 0, 2, 0, 0, 3);
+	ASSERT_FIND(",", 1, 0, 4, 0, 0, 7);
+	ASSERT_NO_FIND(",", 1, 0, 5, 0); /* only four commas: not found */
+	ASSERT_NO_FIND("z", 1, 0, 1, 0); /* the other line is not searched */
+	ASSERT_FIND("c", 1, 1, 1, 0, 0, 3);
+	ASSERT_FIND(",", 1, 1, 2, 0, 0, 2);
+	ASSERT_FIND(",", 1, 1, 1, 0, 0, 0); /* "t," right before a comma: found, the cursor does not move */
+	commas(0, 8);
+	ASSERT_FIND(",", 0, 0, 1, 0, 0, 7);
+	ASSERT_FIND(",", 0, 0, 2, 0, 0, 5);
+	ASSERT_NO_FIND(",", 0, 0, 5, 0);
+	ASSERT_FIND(",", 0, 1, 1, 0, 0, 8); /* "T," right after a comma */
+	ASSERT_FIND(",", 0, 1, 2, 0, 0, 6);
+	ASSERT_NO_FIND("e", 0, 0, 1, 0); /* the character under the cursor is not a match */
+	TEST_ASSERT_EQUAL_UINT(0, e.cy);
+	TEST_ASSERT_EQUAL_UINT(8, e.cx);
+	commas(1, 0);
+	ASSERT_FIND(",", 1, 0, 3, 0, 1, 4); /* the second line: "x,y,,z" */
+	ASSERT_FIND(",", 1, 1, 3, 0, 1, 3);
+	commas(0, 0);
+	ASSERT_FIND(",", 1, 0, 0, 0, 0, 1); /* a count of 0 is 1 */
+}
+
+/** @brief A repeated t or T (";" and ",") with a count of 1 goes over the match right next to the cursor, as in Vim; f and F and counts above 1 do not. */
+static void test_char_find_repeat_skips_the_adjacent_match_for_till(void) {
+	commas(0, 0);
+	ASSERT_FIND(",", 1, 1, 1, 1, 0, 2);
+	ASSERT_FIND(",", 1, 1, 2, 1, 0, 2); /* a count of 2 does not skip: matches at 1 and 3 */
+	ASSERT_FIND(",", 1, 0, 1, 1, 0, 1); /* f is not skipped: a repeated f is the same as a typed one */
+	commas(0, 2);
+	ASSERT_FIND(",", 1, 1, 1, 1, 0, 4);
+	commas(0, 8);
+	ASSERT_FIND(",", 0, 1, 1, 1, 0, 6);
+	ASSERT_FIND(",", 0, 1, 1, 0, 0, 8); /* typed, not repeated: stops at once */
+	commas(0, 6);
+	ASSERT_FIND(",", 0, 1, 1, 1, 0, 4);
+	commas(0, 1);
+	ASSERT_NO_FIND("b", 1, 1, 1, 1); /* "tb" repeated with the only "b" right next to the cursor: skipped, nothing left (Vim: "l" "tb" ";" stays) */
+	commas(0, 0);
+	ASSERT_FIND("b", 1, 1, 1, 1, 0, 1); /* not next to the cursor: not skipped */
+}
+
+/** @brief The character searched for is a complete UTF-8 character: targets, counts, till, backward, and tab and control bytes (marks) as targets. */
+static void test_char_find_handles_multibyte_tab_and_marks(void) {
+	accents(0);
+	ASSERT_FIND("\xc3\xa9", 1, 0, 1, 0, 0, 1);
+	ASSERT_FIND("\xc3\xa9", 1, 0, 2, 0, 0, 7);
+	ASSERT_NO_FIND("\xc3\xa9", 1, 0, 4, 0);
+	ASSERT_FIND("\xc3\xa9", 1, 1, 1, 0, 0, 0);
+	ASSERT_FIND("\xc3\xa9", 1, 1, 1, 1, 0, 6); /* skipped the adjacent one */
+	ASSERT_FIND("x", 1, 0, 1, 0, 0, 9);
+	accents(11);
+	ASSERT_FIND("\xc3\xa9", 0, 0, 1, 0, 0, 7);
+	ASSERT_FIND("\xc3\xa9", 0, 1, 1, 0, 0, 9);
+	ASSERT_NO_FIND("e", 1, 0, 1, 0);
+	accents(9);
+	ASSERT_FIND("\xc3\xa9", 1, 1, 1, 0, 0, 10);
+	ASSERT_NO_FIND("\xc3", 1, 0, 1, 0); /* half a character is not a character of the text */
+	editor_free(&e);
+	accents(0);
+	e.cy = 1;
+	ASSERT_FIND("\t", 1, 0, 1, 0, 1, 2);
+	ASSERT_FIND("\t", 1, 1, 1, 0, 1, 1);
+	ASSERT_FIND("\x01", 1, 0, 1, 0, 1, 5);
+	ASSERT_FIND("\x01", 1, 1, 1, 0, 1, 4);
+	e.cx = 6;
+	ASSERT_FIND("\t", 0, 0, 1, 0, 1, 2);
+	ASSERT_FIND("\x01", 0, 1, 1, 0, 1, 6);
+}
+
+/** @brief f, t, F and T on an editor without lines, or with the cursor beyond them, find nothing. */
+static void test_char_find_on_an_empty_editor(void) {
+	editor_free(&e);
+	editor_init(&e);
+	int found = -1;
+	motion_pos_t t = motion_char_find(&e, "a", 1, 0, 1, 0, &found);
+	TEST_ASSERT_EQUAL_INT(0, found);
+	TEST_ASSERT_EQUAL_UINT(0, t.y);
+	TEST_ASSERT_EQUAL_UINT(0, t.x);
+	editor_append_line(&e, "");
+	ASSERT_NO_FIND("a", 1, 0, 1, 0);
+	ASSERT_NO_FIND("a", 0, 1, 1, 1);
+	TEST_ASSERT_EQUAL_UINT(0, motion_char_find(&e, "a", 1, 0, 1, 0, NULL).x); /* found may be NULL */
+}
+
+/** @brief The keys f, t, F, T with counts move the cursor as in Vim and set the wanted column from the target. */
+static void test_find_keys_move_the_cursor(void) {
+	commas(0, 0);
+	TEST_ASSERT_EQUAL_INT(0, press('f'));
+	TEST_ASSERT_EQUAL_UINT(0, e.cx); /* nothing moves until the character arrives */
+	TEST_ASSERT_EQUAL_INT(1, press(','));
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_UINT(1, e.wantcol);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.modified);
+	commas(0, 0);
+	type_keys("2f,");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	commas(0, 0);
+	type_keys("4f,");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	commas(0, 0);
+	type_keys("tc");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	commas(0, 0);
+	type_keys("2t,");
+	TEST_ASSERT_EQUAL_UINT(2, e.cx);
+	commas(0, 8);
+	type_keys("F,");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	commas(0, 8);
+	type_keys("2F,");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	commas(0, 8);
+	type_keys("T,");
+	TEST_ASSERT_EQUAL_UINT(8, e.cx);
+	commas(0, 8);
+	type_keys("2T,");
+	TEST_ASSERT_EQUAL_UINT(6, e.cx);
+	TEST_ASSERT_EQUAL_UINT(6, e.wantcol);
+	TEST_ASSERT_EQUAL_UINT(0, e.modified);
+}
+
+/** @brief A search that finds nothing leaves the cursor and the wanted column alone and returns 0; the search is still the last one (Vim data: "f," "fz" ";" stays). */
+static void test_a_failed_find_keeps_the_cursor_and_the_wanted_column(void) {
+	commas(0, 0);
+	press('$');
+	press('f');
+	TEST_ASSERT_EQUAL_INT(0, press('z'));
+	TEST_ASSERT_EQUAL_UINT(8, e.cx);
+	TEST_ASSERT_EQUAL_UINT(EDITOR_WANTCOL_EOL, e.wantcol);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	commas(0, 0);
+	type_keys("5f,");
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	type_keys("9fz");
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	commas(0, 0);
+	type_keys("f,fz;"); /* the last search is "fz" now: ";" finds nothing, it does not repeat "f," */
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	type_keys(",");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	commas(0, 0);
+	type_keys("f,2f9;");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	commas(0, 0);
+	type_keys("f,;"); /* without a failed search in between, ";" repeats "f," */
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+}
+
+/** @brief A t or T that stays where it is (a match right next to the cursor) is a success: it sets the wanted column, returns 0 and is the last search. */
+static void test_a_find_that_does_not_move_sets_the_wanted_column(void) {
+	editor_free(&e);
+	editor_init(&e);
+	editor_append_line(&e, "ab,c");
+	e.cx = 3;
+	press('$');
+	TEST_ASSERT_EQUAL_UINT(EDITOR_WANTCOL_EOL, e.wantcol);
+	press('T');
+	TEST_ASSERT_EQUAL_INT(0, press(','));
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	TEST_ASSERT_EQUAL_UINT(3, e.wantcol);
+	e.cx = 0;
+	e.wantcol = 7;
+	type_keys("t,");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_UINT(1, e.wantcol);
+}
+
+/** @brief ";" repeats the last search in the same direction and "," in the opposite one, for each of f, t, F and T (values of the real Vim). */
+static void test_semicolon_and_comma_repeat_the_last_find(void) {
+	commas(0, 0);
+	type_keys("f,;;");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	type_keys(",");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	commas(0, 8);
+	type_keys("2F,;");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	type_keys(",");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	commas(0, 4);
+	type_keys("f,F,"); /* a later search replaces the earlier one, its kind and direction too */
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	type_keys(";");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	type_keys(",");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	commas(0, 8);
+	type_keys("F,,"); /* "," is a forward f, with nothing after 7 */
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	commas(0, 0);
+	type_keys("f,2;");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	commas(0, 8);
+	type_keys("F,2,");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	commas(0, 0);
+	type_keys("6l2F,");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	type_keys("2,");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	TEST_ASSERT_EQUAL_UINT(7, e.wantcol);
+	TEST_ASSERT_EQUAL_UINT(0, e.modified);
+}
+
+/** @brief A repeated t and T jump over the adjacent match (cpoptions default, checked in Vim): "t,;" 0 to 2 to 4, "$T,;" 6 to 4, "t,," stays, "2t,;" 2 to 4, "t,2;" to 2. */
+static void test_repeated_till_jumps_over_the_adjacent_match(void) {
+	commas(0, 0);
+	type_keys("t,");
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	type_keys(";");
+	TEST_ASSERT_EQUAL_UINT(2, e.cx);
+	type_keys(";");
+	TEST_ASSERT_EQUAL_UINT(4, e.cx);
+	commas(0, 0);
+	type_keys("t,,");
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	commas(0, 8);
+	type_keys("T,;");
+	TEST_ASSERT_EQUAL_UINT(6, e.cx);
+	type_keys(";");
+	TEST_ASSERT_EQUAL_UINT(4, e.cx);
+	commas(0, 0);
+	type_keys("2t,;");
+	TEST_ASSERT_EQUAL_UINT(4, e.cx);
+	commas(0, 0);
+	type_keys("t,2;");
+	TEST_ASSERT_EQUAL_UINT(2, e.cx);
+	commas(0, 0);
+	type_keys("f,;"); /* f is not skipped */
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+}
+
+/** @brief ";" and "," before any search do nothing (no redraw, no message, no change). */
+static void test_semicolon_and_comma_without_a_search_do_nothing(void) {
+	commas(0, 3);
+	TEST_ASSERT_EQUAL_INT(0, press(';'));
+	TEST_ASSERT_EQUAL_INT(0, press(','));
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.modified);
+	press('f');
+	press(KEY_ESC); /* a cancelled search is not a search */
+	TEST_ASSERT_EQUAL_INT(0, press(';'));
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+}
+
+/** @brief The last search lives in the editor, not the line: it works on another line (Vim: "f," "j" ";" gives 1,3; "F," then; "," from 0 stays). */
+static void test_the_last_find_is_kept_across_lines(void) {
+	commas(0, 0);
+	type_keys("f,j;");
+	TEST_ASSERT_EQUAL_UINT(1, e.cy);
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	commas(0, 0);
+	type_keys("f,jF,");
+	TEST_ASSERT_EQUAL_UINT(1, e.cy);
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	commas(0, 0);
+	type_keys("f,j0,");
+	TEST_ASSERT_EQUAL_UINT(1, e.cy);
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	commas(0, 0);
+	type_keys("f,j");
+	type_keys("3;"); /* line 2 "x,y,,z": the commas after column 1 are at 3 and 4: only two, so not found */
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+}
+
+/** @brief The character after f, t, F or T may be a multibyte one arriving byte by byte: the prefix stays pending on a half character, and the full one searches. */
+static void test_find_key_takes_a_multibyte_character_byte_by_byte(void) {
+	accents(0);
+	press('f');
+	TEST_ASSERT_EQUAL_INT(0, press(0xc3));
+	TEST_ASSERT_EQUAL_UINT('f', e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	TEST_ASSERT_EQUAL_INT(1, press(0xa9));
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	type_keys(";");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	type_keys(",");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	accents(0);
+	type_keys("2f\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(7, e.cx);
+	type_keys("T\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	type_keys("t\xc3\xa9");
+	TEST_ASSERT_EQUAL_UINT(6, e.cx);
+	accents(0);
+	type_keys("f\xf0\x9f\x98\x80"); /* a four-byte character that is not in the text: not found */
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+}
+
+/** @brief Esc after f, t, F or T cancels it, and so does a key that is not the rest of a half character or an invalid character; the key itself is not searched for. */
+static void test_esc_and_bad_bytes_cancel_a_find(void) {
+	commas(0, 0);
+	press('f');
+	TEST_ASSERT_EQUAL_INT(0, press(KEY_ESC));
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	press(',');
+	TEST_ASSERT_EQUAL_UINT(0, e.cx); /* "," alone is a repeat of nothing, not the target of the cancelled f */
+	press('2');
+	press('t');
+	press(KEY_ESC);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.count);
+	press('l');
+	TEST_ASSERT_EQUAL_UINT(1, e.cx); /* the count of the cancelled t is gone: one step */
+	accents(0);
+	press('f');
+	press(0xc3);
+	TEST_ASSERT_EQUAL_INT(0, press('x')); /* a half character followed by a letter: both dropped */
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	press(';');
+	TEST_ASSERT_EQUAL_UINT(0, e.cx); /* and nothing was stored */
+	press('f');
+	press(0xc3);
+	press(KEY_ESC);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	press('f');
+	press(0x80); /* a stray continuation byte */
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	press('f');
+	press(0xe0);
+	press(0x80);
+	press(0x80); /* complete but overlong: not a character */
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	TEST_ASSERT_EQUAL_UINT(0, e.lastfind.cmd); /* no invalid character was stored */
+	press(';');
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	type_keys("f\xc3\xa9");
+	press('f');
+	press(0xe0);
+	press(0x80);
+	press(0x80);
+	TEST_ASSERT_EQUAL_STRING("\xc3\xa9", e.lastfind.ch); /* the earlier search stays the last */
+	press('f');
+	press(KEY_RIGHT); /* a special key is not a character */
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+}
+
+/** @brief After f, t, F or T every key is the character, digits and prefix letters included; Ctrl+Q still quits and ends a half character. */
+static void test_find_target_may_be_a_digit_a_prefix_letter_or_a_control_key(void) {
+	editor_free(&e);
+	editor_init(&e);
+	editor_append_line(&e, "a3bgZ:\x02" "c");
+	press('f');
+	press('3');
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.count);
+	type_keys("fg");
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	type_keys("fZ");
+	TEST_ASSERT_EQUAL_UINT(4, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_INT(0, e.quit);
+	type_keys("f:");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	e.cx = 0;
+	type_keys("f\x02");
+	TEST_ASSERT_EQUAL_UINT(6, e.cx);
+	press('f');
+	press(0xc3);
+	press(0x11);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+}
+
+/** @brief In insert and command mode f, t, F, T, ";" and "," are typed text, not searches, and a half character typed there is not taken by a search. */
+static void test_find_keys_are_normal_mode_only(void) {
+	commas(0, 0);
+	press('i');
+	type_keys("ft;,FT");
+	TEST_ASSERT_EQUAL_STRING("ft;,FTa,b,c,d,e", e.lines[0]);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(1, e.modified);
+	press(KEY_ESC);
+	press(':');
+	type_keys("f,t;");
+	TEST_ASSERT_EQUAL_STRING("f,t;", e.cmd.text);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	press(KEY_ESC);
+	commas(0, 0);
+	press('f');
+	press(0xc3);
+	press(':'); /* a mode change drops the pending search */
+	press(KEY_ESC);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.prefix);
+	TEST_ASSERT_EQUAL_UINT(0, e.pend_len);
+	press('f');
+	press('i'); /* "i" is the target, not insert mode */
+	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_NORMAL, e.mode);
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+}
+
+/** @brief The last search is kept when a different one fails and over mode changes; load/free forget it. */
+static void test_the_last_find_survives_insert_mode_and_dies_with_the_text(void) {
+	commas(0, 0);
+	type_keys("f,");
+	press('i');
+	press(KEY_ESC);
+	TEST_ASSERT_EQUAL_UINT('f', e.lastfind.cmd);
+	TEST_ASSERT_EQUAL_STRING(",", e.lastfind.ch);
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(0, e.lastfind.cmd);
+	commas(0, 0);
+	TEST_ASSERT_EQUAL_INT(0, press(';'));
+}
+
+/** @brief A far target scrolls the view sideways (the key code only moves the cursor), and a find never touches the vertical window. */
+static void test_find_scrolls_sideways_and_not_vertically(void) {
+	char line[101];
+	memset(line, 'a', 100);
+	line[100] = '\0';
+	line[90] = 'Q';
+	editor_free(&e);
+	editor_init(&e);
+	editor_append_line(&e, line);
+	editor_append_line(&e, "second");
+	editor_set_window_height(&e, 5);
+	type_keys("fQ");
+	editor_scroll_cols(&e, 20);
+	TEST_ASSERT_EQUAL_UINT(90, e.cx);
+	TEST_ASSERT_EQUAL_UINT(71, e.coloff);
+	TEST_ASSERT_EQUAL_UINT(0, e.rowoff);
+	type_keys("FQ0");
+	type_keys("fa");
+	TEST_ASSERT_EQUAL_UINT(1, e.cx);
+}
+
 /** @brief Run the motion tests. */
 void test_motions_suite(void) {
 	RUN_TEST(test_motions_match_vim_on_every_start);
@@ -992,4 +1463,21 @@ void test_motions_suite(void) {
 	RUN_TEST(test_page_keys_use_the_latest_window_height);
 	RUN_TEST(test_page_keys_are_normal_mode_only);
 	RUN_TEST(test_page_keys_end_a_pending_command_and_leave_the_window_alone);
+	RUN_TEST(test_char_find_matches_vim);
+	RUN_TEST(test_char_find_repeat_skips_the_adjacent_match_for_till);
+	RUN_TEST(test_char_find_handles_multibyte_tab_and_marks);
+	RUN_TEST(test_char_find_on_an_empty_editor);
+	RUN_TEST(test_find_keys_move_the_cursor);
+	RUN_TEST(test_a_failed_find_keeps_the_cursor_and_the_wanted_column);
+	RUN_TEST(test_a_find_that_does_not_move_sets_the_wanted_column);
+	RUN_TEST(test_semicolon_and_comma_repeat_the_last_find);
+	RUN_TEST(test_repeated_till_jumps_over_the_adjacent_match);
+	RUN_TEST(test_semicolon_and_comma_without_a_search_do_nothing);
+	RUN_TEST(test_the_last_find_is_kept_across_lines);
+	RUN_TEST(test_find_key_takes_a_multibyte_character_byte_by_byte);
+	RUN_TEST(test_esc_and_bad_bytes_cancel_a_find);
+	RUN_TEST(test_find_target_may_be_a_digit_a_prefix_letter_or_a_control_key);
+	RUN_TEST(test_find_keys_are_normal_mode_only);
+	RUN_TEST(test_the_last_find_survives_insert_mode_and_dies_with_the_text);
+	RUN_TEST(test_find_scrolls_sideways_and_not_vertically);
 }

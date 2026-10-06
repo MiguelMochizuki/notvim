@@ -232,3 +232,32 @@ motion_pos_t motion_bracket_match(const editor_t *e) {
 		}
 	}
 }
+
+motion_pos_t motion_char_find(const editor_t *e, const char *ch, int forward, int till, size_t count, int repeat, int *found) {
+	motion_pos_t cur = { e->cy, e->cx };
+	if (found) *found = 0;
+	if (e->cy >= e->count) return cur;
+	const char *line = e->lines[e->cy];
+	size_t n = strlen(ch), x = e->cx, len = strlen(line);
+	if (count == 0) count = 1;
+	int skip = repeat && till && count == 1; /* Vim's cpoptions without ';': the match right next to the cursor does not count */
+	size_t next = forward ? x + utf8_cell_len(line + x) : utf8_prev(line, x);
+	for (;;) {
+		if (forward) {
+			x += utf8_cell_len(line + x);
+			if (x >= len) return cur;
+		} else {
+			if (x == 0) return cur;
+			x = utf8_prev(line, x);
+		}
+		if (utf8_cell_len(line + x) != n || memcmp(line + x, ch, n) != 0) continue;
+		if (skip && x == next) {
+			skip = 0;
+			continue;
+		}
+		if (--count == 0) break;
+	}
+	if (found) *found = 1;
+	if (till) x = forward ? utf8_prev(line, x) : x + utf8_cell_len(line + x);
+	return (motion_pos_t){ e->cy, x };
+}

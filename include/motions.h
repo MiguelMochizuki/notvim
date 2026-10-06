@@ -79,4 +79,16 @@ motion_pos_t motion_paragraph_prev(const editor_t *e);
  */
 motion_pos_t motion_bracket_match(const editor_t *e);
 
+/**
+ * @brief "f", "t", "F" and "T" (and ";" and ","): the @p count th occurrence of the character @p ch on the cursor line, searching from the cursor.
+ * @param ch      NUL-terminated bytes of one character (a UTF-8 character or a single byte).
+ * @param forward Non-zero to search to the right ("f", "t"), zero to the left.
+ * @param till    Non-zero for "t" and "T": the target is the character before the match (seen from the cursor), not the match.
+ * @param count   Which occurrence, 1 or more (0 is taken as 1).
+ * @param repeat  Non-zero for ";" and ",": a "till" search with a count of 1 skips a match right next to the cursor, as Vim does with its default 'cpoptions'.
+ * @param found   Receives non-zero if the occurrence exists, else 0; may be NULL.
+ * @return The target, or the cursor if the occurrence does not exist.
+ */
+motion_pos_t motion_char_find(const editor_t *e, const char *ch, int forward, int till, size_t count, int repeat, int *found);
+
 #endif

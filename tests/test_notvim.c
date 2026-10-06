@@ -542,6 +542,47 @@ static void test_notvim_paragraph_and_bracket_motions_move_the_cursor(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, at_blank);
 }
 
+/** @brief "f", "t", ";" and "," move the cursor in the real program, also onto a multibyte character sent as one write. */
+static void test_notvim_character_search_moves_the_cursor(void) {
+	const char *path = tmpdir_write("find.txt", "ab,cd,e\nx\xc3\xa9y\xc3\xa9z\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 6, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	char after_f[2048], after_semi[2048], after_comma[2048], after_t[2048], after_j[2048], after_zero[2048], after_accent[2048], after_again[2048];
+	send_and_read(master, "f,", after_f, sizeof(after_f));
+	send_and_read(master, ";", after_semi, sizeof(after_semi));
+	send_and_read(master, ",", after_comma, sizeof(after_comma));
+	send_and_read(master, "t,", after_t, sizeof(after_t)); /* the cursor is on a comma: "t," goes to the character before the next one */
+	send_and_read(master, "j", after_j, sizeof(after_j));
+	send_and_read(master, "0", after_zero, sizeof(after_zero));
+	send_and_read(master, "f\xc3\xa9", after_accent, sizeof(after_accent));
+	send_and_read(master, ";", after_again, sizeof(after_again));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	const char *text = "ab,cd,e\r\nx\xc3\xa9y\xc3\xa9z";
+	screen(expected, sizeof(expected), text, 1, 3);
+	TEST_ASSERT_EQUAL_STRING(expected, after_f);
+	screen(expected, sizeof(expected), text, 1, 6);
+	TEST_ASSERT_EQUAL_STRING(expected, after_semi);
+	screen(expected, sizeof(expected), text, 1, 3);
+	TEST_ASSERT_EQUAL_STRING(expected, after_comma);
+	screen(expected, sizeof(expected), text, 1, 5);
+	TEST_ASSERT_EQUAL_STRING(expected, after_t);
+	screen_at(expected, sizeof(expected), text, 2, 5, 2, 5);
+	TEST_ASSERT_EQUAL_STRING(expected, after_j);
+	screen(expected, sizeof(expected), text, 2, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, after_zero);
+	screen(expected, sizeof(expected), text, 2, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, after_accent);
+	screen(expected, sizeof(expected), text, 2, 4);
+	TEST_ASSERT_EQUAL_STRING(expected, after_again);
+}
+
 /** @brief After "$", j keeps to the end of each line on a pty. */
 static void test_notvim_dollar_then_j_keeps_to_the_end(void) {
 	const char *path = tmpdir_write("eol.txt", "abcdef\nab\nabcdefgh\n");
@@ -2347,6 +2388,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_dollar_then_j_keeps_to_the_end);
 	RUN_TEST(test_notvim_page_keys_scroll_and_follow_a_resize);
 	RUN_TEST(test_notvim_paragraph_and_bracket_motions_move_the_cursor);
+	RUN_TEST(test_notvim_character_search_moves_the_cursor);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);
 	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);

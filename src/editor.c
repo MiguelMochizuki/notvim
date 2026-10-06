@@ -21,6 +21,7 @@ void editor_init(editor_t *e) {
 	e->modified = 0;
 	e->quit = 0;
 	e->pending = (editor_pending_t){ 0, 0 };
+	e->lastfind = (editor_find_t){ 0, { 0 } };
 	e->pend_len = 0;
 	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
@@ -678,6 +679,54 @@ static int page_key(editor_t *e, int key, size_t n) {
 	return 1;
 }
 
+/** @brief Run the character search @p cmd ('f', 't', 'F' or 'T') for @p ch, @p n times; the cursor moves only if the character is found, and then @c wantcol follows it. @return Non-zero if the cursor moved. */
+static int find_char(editor_t *e, char cmd, const char *ch, size_t n, int repeat) {
+	int found;
+	motion_pos_t t = motion_char_find(e, ch, cmd == 'f' || cmd == 't', cmd == 't' || cmd == 'T', n, repeat, &found);
+	return found ? goto_target(e, t, 0) : 0;
+}
+
+/** @brief The character after "f", "t", "F" or "T" (prefix @p pend.prefix): collect the bytes of one UTF-8 character in @c pend, then search; Esc, a special key or a bad byte cancel. */
+static int find_prefix_key(editor_t *e, editor_pending_t pend, int key, size_t n) {
+	unsigned char c = (unsigned char)key;
+	if (key >= 256) { e->pend_len = 0; return 0; } /* Esc (KEY_ESC) and the special keys cancel */
+	if (e->pend_len > 0) {
+		if ((c & 0xc0) != 0x80) { e->pend_len = 0; return 0; } /* a half character followed by anything else: both dropped */
+		e->pend[e->pend_len++] = (char)c;
+		unsigned char lead = (unsigned char)e->pend[0];
+		size_t need = lead >= 0xf0 ? 4 : lead >= 0xe0 ? 3 : 2;
+		if (e->pend_len < need) {
+			e->pending = pend;
+			return 0;
+		}
+	} else if (c >= 0xc2 && c <= 0xf4) { /* lead of a multibyte character */
+		e->pend[e->pend_len++] = (char)c;
+		e->pending = pend;
+		return 0;
+	} else if (c >= 0x80) { /* a stray continuation or invalid byte */
+		return 0;
+	} else {
+		e->pend[e->pend_len++] = (char)c;
+	}
+	char buf[5];
+	memcpy(buf, e->pend, e->pend_len);
+	buf[e->pend_len] = '\0';
+	size_t len = e->pend_len;
+	e->pend_len = 0;
+	if (utf8_valid_len(buf) != len) return 0;
+	e->lastfind.cmd = pend.prefix;
+	memcpy(e->lastfind.ch, buf, len + 1);
+	return find_char(e, pend.prefix, buf, n, 0);
+}
+
+/** @brief ";" ("," if @p reverse): repeat the last character search in the same (the opposite) direction; nothing without one. */
+static int repeat_find(editor_t *e, int reverse, size_t n) {
+	char cmd = e->lastfind.cmd;
+	if (!cmd) return 0;
+	if (reverse) cmd = cmd == 'f' ? 'F' : cmd == 'F' ? 'f' : cmd == 't' ? 'T' : 't';
+	return find_char(e, cmd, e->lastfind.ch, n, 1);
+}
+
 /** @brief "{n}$": n-1 lines down, then the end of that line; Vim fails on the last line (the cursor stays) but still wants the end for "j" and "k". */
 static int goto_line_end(editor_t *e, size_t n) {
 	if (n > 1 && !repeat_move(e, EDITOR_MOVE_DOWN, n - 1)) {
@@ -715,6 +764,7 @@ static int handle_key(editor_t *e, int key) {
 		return 0;
 	}
 	if (e->mode != EDITOR_MODE_NORMAL && key < 256) return type_byte(e, (unsigned char)key);
+	if (pend.prefix == 'f' || pend.prefix == 't' || pend.prefix == 'F' || pend.prefix == 'T') return find_prefix_key(e, pend, key, n);
 	e->pend_len = 0;
 	if (pend.prefix == 'g') return key == 'g' ? goto_target(e, motion_goto_line(e, n), 0) : 0; /* "g" and any other key: dropped */
 	if ((key >= '1' && key <= '9') || (key == '0' && pend.count)) {
@@ -738,6 +788,10 @@ static int handle_key(editor_t *e, int key) {
 	case '%': return goto_target(e, motion_bracket_match(e), 0);
 	case 0x06: case 0x02: case 0x04: case 0x15: return page_key(e, key, pend.count);
 	case 'G': return goto_target(e, motion_goto_line(e, pend.count), 0);
+	case 'f': case 't': case 'F': case 'T':
+		e->pending = (editor_pending_t){ (char)key, pend.count };
+		return 0;
+	case ';': case ',': return repeat_find(e, key == ',', n);
 	case 'g':
 		e->pending = (editor_pending_t){ 'g', pend.count };
 		return 0;

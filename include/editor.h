@@ -26,9 +26,16 @@ typedef enum {
  * editor_handle_key() takes it at the start of each key and clears it, and only a key that continues the command stores it again.
  */
 typedef struct {
-	char prefix;  /**< 0, or the prefix key that waits for the next key: 'Z' (for "ZZ" and "ZQ") or 'g' (for "gg"). */
+	char prefix;  /**< 0, or the prefix key that waits for the next key: 'Z' (for "ZZ" and "ZQ"), 'g' (for "gg") or 'f', 't', 'F', 'T' (which wait for the character to find; its bytes are
+	                   collected in @ref editor_t::pend, so a half UTF-8 character keeps the prefix pending). */
 	size_t count; /**< The count typed so far, 0 for none, at most @ref EDITOR_COUNT_MAX. */
 } editor_pending_t;
+
+/** The last character search, for ";" and ",": what "f", "t", "F" or "T" was asked for (even if it found nothing, as in Vim). */
+typedef struct {
+	char cmd;   /**< 0 if no search was made yet, else 'f', 't', 'F' or 'T'. */
+	char ch[5]; /**< The character searched for, as the NUL-terminated bytes of one UTF-8 character (or one other byte). */
+} editor_find_t;
 
 /** Editor state: the text as a growable array of lines. */
 typedef struct {
@@ -59,7 +66,8 @@ typedef struct {
 	                    and exits with status 0. 0 after init, free and load; a refused quit leaves it 0. */
 	editor_pending_t pending; /**< The unfinished normal-mode command (a count and a prefix key); all zero after init, free and load, and cleared by every key
 	                               that does not continue it and whenever the mode is not normal. */
-	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode that is still incomplete; see @ref pend_len. */
+	editor_find_t lastfind; /**< The last "f", "t", "F" or "T"; all zero after init, free and load. */
+	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode, or after "f", "t", "F" or "T", that is still incomplete; see @ref pend_len. */
 	size_t pend_len; /**< Number of bytes in @ref pend; 0 when no character is half typed. Reset by any key that is not a
 	                      continuation byte, and by leaving insert mode. */
 	int crlf;     /**< Non-zero if the loaded file used CRLF line endings (lines are stored without the CR);
@@ -245,6 +253,13 @@ void editor_set_window_height(editor_t *e, size_t height);
  * Paragraphs and brackets (normal mode): "}" and "{" go to the next and previous empty line and "%" to the matching bracket (see motions.h).
  * "}" and "{" repeat with a count, and the whole command fails (the cursor stays) if a step before the last finds nothing more, as in Vim; "%" ignores a count and does nothing without a match. @c wantcol is set from the target
  * as for the other motions, even if the cursor does not move; they return non-zero only if the cursor moved and never set @c modified.
+ *
+ * Character search (normal mode): "f{char}" moves to the next occurrence of {char} on the cursor line, "t{char}" to the character before it, "F" and "T" the same backwards;
+ * {char} is one complete UTF-8 character (or one other byte, a tab or a control byte included; its bytes may arrive in separate keys, Esc or anything that is not the rest of the
+ * character cancels). A count N means the Nth occurrence; if there are fewer, or none, the cursor stays and @c wantcol is unchanged. Every search is stored in @c lastfind, found or not.
+ * ";" repeats it in the same direction and "," in the opposite one (nothing without a stored search); a repeated "t" or "T" with a count of 1 does not stop on the match right next to the
+ * cursor but goes on to the next (Vim's default 'cpoptions'). The result sets @c wantcol from the target, even if the cursor does not move; they return non-zero only if the cursor moved
+ * and never set @c modified. In insert and command mode the keys are typed. See motions.h for the pure target function.
  *
  * Page keys (normal mode, window height from editor_set_window_height(); h is that height, the window has the lines @c rowoff to @c rowoff + h - 1; with a height of
  * 0 or no lines they do nothing). The ruling comes from Vim's documentation, because Vim's -es mode has a window height but does not scroll: "Ctrl+f" (0x06)
