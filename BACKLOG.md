@@ -21,7 +21,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ### H8 Motions (as in Vim)
 
-- **H8.4** As user, I want counts before motions (`5j`, `3w`, `10l`)
+- **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
 
 ## To do
 
@@ -57,8 +57,6 @@ Each story below was reproduced against the real binary on a pty or found by a r
 
 ### H8 Motions (as in Vim)
 
-- **H8.3** As user, I want `gg` and `G` to go to the first and last line, and `{count}G` to go to a given line
-- **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
 - **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
 - **H8.7** As user, I want `f`, `t`, `F`, `T` to jump to a character on the line, and `;` and `,` to repeat
 
@@ -112,6 +110,15 @@ Do these once insert mode and yank exist.
   - Decisions: classes are Vim's 'iskeyword' (ASCII word characters and U+00C0 and up) plus a reduced `utf_class`: spaces, punctuation and symbols, and Hiragana, Katakana, CJK and Hangul as classes of their own.
   - Decisions: an invalid byte is classed as the character with that code; the Unicode spaces of Vim's table are blanks; an empty line is a word for `w` and `b`, not for `e`.
   - Known gaps: Vim's full `utf_class` table (emoji, Arabic and other punctuation below U+2000, full-width forms) is not copied: they count as letters. Counts come with H8.4.
+- **H8.3** As user, I want `gg` and `G` to go to the first and last line, and `{count}G` to go to a given line
+  - Design: `motion_goto_line()` in `motions.c` is a pure motion (line n from 1, 0 or too big means the last); `G` passes the count, `gg` passes the count or 1.
+  - Decisions: the cursor goes to the first non-blank of the line (Vim's `startofline`) and `wantcol` follows it; `g` plus any other key, Esc included, is dropped with the count.
+  - Known gaps: the other `g` commands (`gj`, `gk`, `ge`, `g_`, ...) are ignored; `gg` and `G` are not yet operator targets (H9).
+- **H8.4** As user, I want counts before motions (`5j`, `3w`, `10l`)
+  - Design: ONE pending state in the editor (`pending.count` and `pending.prefix`, replacing the `Z` flag) taken and cleared at every key; the count repeats the one-step motions, stopping at the text ends.
+  - Decisions: digits `1`-`9` start a count and `0` continues it (alone it is the motion); counts are clamped to `EDITOR_COUNT_MAX`; `{n}$` goes n-1 lines down (fails on the last line, as Vim).
+  - Decisions: `0` and `^` ignore the count; Esc or an unknown key cancels it; normal mode only; move keys always ask for a redraw. Data from the real Vim (`tests/counts_vim.inc`).
+  - Known gaps: the pending count is not shown (Vim's showcmd); `3i`, `3:`, `3x` and other commands ignore or drop the count; the Vim data skips double-width characters (H6.12).
 
 ### H4 Saving and quitting
 
