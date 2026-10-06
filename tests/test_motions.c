@@ -915,6 +915,31 @@ static void test_page_keys_use_the_latest_window_height(void) {
 	TEST_ASSERT_EQUAL_UINT(5, e.winrows);
 }
 
+/** @brief A count bigger than the window is clamped to the window height, for this key and the next ones (checked in a real Vim: 50^D gives 'scroll' 23 in a 23-line window). */
+static void test_page_key_count_is_clamped_to_the_window_height(void) {
+	page(100, 10, 0, 0);
+	type_keys("50\x04");
+	ASSERT_PAGE(10, 10);
+	TEST_ASSERT_EQUAL_UINT(10, e.scroll);
+	press(0x04);
+	ASSERT_PAGE(20, 20);
+	type_keys("50\x15");
+	ASSERT_PAGE(10, 10);
+}
+
+/** @brief A resize resets the scroll amount to half the window (:help 'scroll'); the same height again keeps it. */
+static void test_page_key_scroll_is_reset_by_a_resize(void) {
+	page(100, 10, 0, 0);
+	type_keys("3\x04");
+	editor_set_window_height(&e, 10);
+	press(0x04);
+	ASSERT_PAGE(6, 6);
+	editor_set_window_height(&e, 20);
+	TEST_ASSERT_EQUAL_UINT(0, e.scroll);
+	press(0x04);
+	ASSERT_PAGE(16, 16);
+}
+
 /** @brief Backward motions on a 200,000 character line take linear time: the alarm kills the run if one key is quadratic. */
 static void test_backward_motions_on_a_very_long_line_are_fast(void) {
 	enum { LEN = 200000 };
@@ -1484,6 +1509,8 @@ void test_motions_suite(void) {
 	RUN_TEST(test_page_keys_put_the_cursor_on_the_first_non_blank);
 	RUN_TEST(test_page_keys_need_a_window_height_and_lines);
 	RUN_TEST(test_page_keys_use_the_latest_window_height);
+	RUN_TEST(test_page_key_count_is_clamped_to_the_window_height);
+	RUN_TEST(test_page_key_scroll_is_reset_by_a_resize);
 	RUN_TEST(test_backward_motions_on_a_very_long_line_are_fast);
 	RUN_TEST(test_page_keys_are_normal_mode_only);
 	RUN_TEST(test_page_keys_end_a_pending_command_and_leave_the_window_alone);

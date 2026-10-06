@@ -662,7 +662,7 @@ static int page_key(editor_t *e, int key, size_t n) {
 			}
 		}
 	} else {
-		if (n) e->scroll = n;
+		if (n) e->scroll = n > h ? h : n; /* as Vim: the count never exceeds the window height */
 		size_t by = e->scroll ? e->scroll : h / 2 ? h / 2 : 1;
 		size_t maxtop = fits ? 0 : e->count - h;
 		if (key == 0x04) {
@@ -818,6 +818,7 @@ static int handle_key(editor_t *e, int key) {
 }
 
 void editor_set_window_height(editor_t *e, size_t height) {
+	if (height != e->winrows) e->scroll = 0; /* :help 'scroll': a resize resets it to half the window */
 	e->winrows = height;
 }
 

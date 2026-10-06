@@ -27,7 +27,7 @@ Keys:
 | `{n}` before a motion | Normal mode: repeat `h j k l`, the arrows and the word motions n times, stopping at the ends of the text; `{n}$` goes n-1 lines down; `0` and `^` ignore it; `0` after a digit is part of the count; `Esc` or an unknown key cancels it |
 | `gg` `G` | Normal mode: go to the first and last line, on its first non-blank character; `{n}gg` and `{n}G` go to line n (the last if n is past the end); `g` and another key does nothing |
 | `Ctrl+f` `Ctrl+b` | Normal mode: scroll a page forward or back (the window height minus 2 lines of overlap, `{n}` pages); after `Ctrl+f` the cursor goes to the first line of the window if it was above it, after `Ctrl+b` to its last line, on its first non-blank character |
-| `Ctrl+d` `Ctrl+u` | Normal mode: scroll half a window down or up and move the cursor as far; `{n}` sets the number of lines and keeps it for the next time |
+| `Ctrl+d` `Ctrl+u` | Normal mode: scroll half a window down or up and move the cursor as far; `{n}` sets the number of lines (at most the window height) and keeps it until the window is resized |
 | `{` `}` | Normal mode: previous and next empty line (the ends of the text when there is none); `{n}` repeats, and fails as a whole if the text ends first |
 | `%` | Normal mode: jump to the match of the first `( ) [ ] { }` at or after the cursor on the line, across lines and nesting; nothing happens without a match |
 | `f` `t` `F` `T` | Normal mode, then one character (also accented, tab): go to its next occurrence on the line, or just before it (`t`), forward or backward (`F` `T`); `{n}` picks the nth; nothing happens if it is not there, `Esc` cancels |
@@ -69,7 +69,8 @@ The robustness epic (H6 in [BACKLOG.md](BACKLOG.md)) is finished. What is left:
 - `w b e` classify characters with a reduced copy of Vim's table: emoji, full-width forms and punctuation below U+2000 outside ASCII count as letters. There are no `Home` and `End` keys yet.
 - Invalid UTF-8 and C1 controls are shown as `?` (saved as they were).
 - A command line wider than the terminal is cut at the right edge; Vim scrolls it.
-- `%` ignores brackets in strings and comments differently from Vim (Vim skips quoted ones and pairs `/* */` and `#if`); `{n}%` is not a percentage jump; the page keys were checked against a real Vim only for `Ctrl+f` and `Ctrl+b` on 100 and 10 lines.
+- `%` ignores brackets in strings and comments differently from Vim (Vim skips quoted ones and pairs `/* */` and `#if`); `{n}%` is not a percentage jump; the page keys were checked against a real Vim screen (`Ctrl+f` `Ctrl+b` `Ctrl+d` `Ctrl+u`, counts, ends of the text), but not on wrapped lines.
+- After a motion onto a tab, `j` and `k` keep the tab's first column; Vim keeps its last (planned with H6.12).
 - `f` and `t` take the character as typed: no digraphs (`Ctrl+k`), no `Ctrl+v`, and the cpoptions `;` flag does not exist.
 - The count typed before a command is not shown (Vim shows it at the bottom right), and only motions, `f t F T ; ,`, `gg`, `G` and the page keys use it: `3i`, `3:` and the like ignore it.
 - A fast `Esc` followed by a key in the same write (within 50 ms) is read as an Alt chord and both keys are dropped; Vim treats it as `Esc` and then the key.

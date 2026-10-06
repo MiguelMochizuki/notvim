@@ -114,9 +114,9 @@ Do these once insert mode and yank exist.
   - Known gaps: the pending count is not shown (Vim's showcmd); `3i`, `3:`, `3x` and other commands ignore or drop the count; the Vim data skips double-width characters (H6.12).
 - **H8.5** As user, I want `Ctrl+f`, `Ctrl+b`, `Ctrl+d` and `Ctrl+u` to scroll by pages and half pages
   - Design: glue in `editor.c` on the scroll state (`rowoff` and the cursor change together); the window height comes from `editor_set_window_height()`, called by `main` at startup and after every resize.
-  - Decisions: `Ctrl+f` and `Ctrl+b` move h-2 lines per count; `Ctrl+d` and `Ctrl+u` move `scroll` lines (a count sets it, default h/2); the cursor lands on the first non-blank (`startofline`) and `wantcol` follows. `Ctrl+b` puts the cursor on the last line of the new window and does nothing at the top or on a text that fits (checked in a real Vim through GNU screen).
+  - Decisions: `Ctrl+f` and `Ctrl+b` move h-2 lines per count; `Ctrl+d` and `Ctrl+u` move `scroll` lines (a count sets it, at most h; a resize resets it; default h/2); the cursor lands on the first non-blank (`startofline`) and `wantcol` follows. `Ctrl+b` puts the cursor on the last line of the new window and does nothing at the top or on a text that fits (checked in a real Vim through GNU screen).
   - Decisions: ruling from Vim's documentation, because Vim's `-es` mode has a window height (`:split` and `:resize` set it) but does not scroll; a text that fits in the window does not scroll, normal mode only.
-  - Known gaps: no `Ctrl+e`, `Ctrl+y`, `zt`, `zz`; `scroll` is not an option; the top line after `Ctrl+f` near the end and on a short text is not checked against a real Vim screen.
+  - Known gaps: no `Ctrl+e`, `Ctrl+y`, `zt`, `zz`; `scroll` is not an option; the page keys are not checked on wrapped lines (none exist here).
 - **H8.6** As user, I want `{` and `}` to move by paragraphs and `%` to jump to the matching bracket
   - Design: `motion_paragraph_next()`, `motion_paragraph_prev()` and `motion_bracket_match()` in `motions.c` are pure one-step targets; the key handler repeats `{` and `}` with the count.
   - Decisions: a paragraph boundary is an empty line (blanks do not count); a count fails as a whole when a step before the last runs off the text (Vim's `findpar`); `%` ignores a count.
