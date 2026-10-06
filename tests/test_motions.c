@@ -58,13 +58,18 @@ static const row_t table[] = {
 #include "motions_vim.inc"
 };
 
-/** @brief Fill the shared editor with buffer @p b and put the cursor at (@p y, @p x). */
-static void load(int b, size_t y, size_t x) {
+/** @brief Fill the shared editor with buffer @p b of @p bufs and put the cursor at (@p y, @p x). */
+static void load_from(const buffer_t *bufs, int b, size_t y, size_t x) {
 	editor_free(&e);
 	editor_init(&e);
-	for (size_t i = 0; i < buffers[b].n; i++) TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, buffers[b].lines[i]));
+	for (size_t i = 0; i < bufs[b].n; i++) TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, bufs[b].lines[i]));
 	e.cy = y;
 	e.cx = x;
+}
+
+/** @brief Fill the shared editor with buffer @p b of the motions table and put the cursor at (@p y, @p x). */
+static void load(int b, size_t y, size_t x) {
+	load_from(buffers, b, y, x);
 }
 
 /** @brief The motion for @p key from the cursor of the shared editor. */
@@ -624,6 +629,311 @@ static void test_g_sets_the_wanted_column_from_the_first_non_blank(void) {
 	TEST_ASSERT_EQUAL_UINT(4, e.cx);
 }
 
+
+/** The buffers of blocks_vim.inc, in its order. */
+static const buffer_t block_buffers[] = {
+	BUFFER("a", "b", "", "c", "d", "", "", "e", "  ", "f"),
+	BUFFER("", "", "a"),
+	BUFFER("a", ""),
+	BUFFER("a"),
+	BUFFER(""),
+	BUFFER("  x", "", "  y  z", " "),
+	BUFFER("f(a[1], {b})", "  if (x) {", "    y(z);", "  }", "end)"),
+	BUFFER("(a", "b", "c)"),
+	BUFFER("((a)", "b)", ")"),
+	BUFFER("x(h\xc3\xa9llo)y", "[\xc3\xa9]"),
+	BUFFER("no brackets", ""),
+	BUFFER("  ( )", "}{"),
+};
+
+/** Expected results of "{", "}" and "%" taken from the real Vim 9.1 (see gen-vim-data.sh). */
+static const crow_t blocks_table[] = {
+#include "blocks_vim.inc"
+};
+
+/** @brief The one-step pure motion for the block key of @p key ('{', '}' or '%') from the cursor of the shared editor. */
+static motion_pos_t run_block(char key) {
+	return key == '{' ? motion_paragraph_prev(&e) : key == '}' ? motion_paragraph_next(&e) : motion_bracket_match(&e);
+}
+
+/** @brief The pure "{", "}" and "%" give the target of the real Vim from every character of every buffer (one step, no count) and move nothing. */
+static void test_paragraph_and_bracket_motions_match_vim(void) {
+	char msg[96];
+	for (size_t i = 0; i < sizeof(blocks_table) / sizeof(blocks_table[0]); i++) {
+		const crow_t *r = &blocks_table[i];
+		if (r->count) continue;
+		snprintf(msg, sizeof(msg), "buffer %d, %s, from %zu,%zu", r->buf, r->keys, r->fy, r->fx);
+		load_from(block_buffers, r->buf, r->fy, r->fx);
+		motion_pos_t t = run_block(r->keys[0]);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->ty, t.y, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->tx, t.x, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->fy, e.cy, "a motion must not move the cursor");
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->fx, e.cx, "a motion must not move the cursor");
+	}
+}
+
+/** @brief The keys "{", "}" and "%", with and without a count, put the cursor where Vim does, the "j" after them uses Vim's wanted column, and the text stays unmodified. */
+static void test_paragraph_and_bracket_keys_match_vim(void) {
+	char msg[96];
+	for (size_t i = 0; i < sizeof(blocks_table) / sizeof(blocks_table[0]); i++) {
+		const crow_t *r = &blocks_table[i];
+		snprintf(msg, sizeof(msg), "buffer %d, %u%s, from %zu,%zu", r->buf, r->count, r->keys, r->fy, r->fx);
+		load_from(block_buffers, r->buf, r->fy, r->fx);
+		e.wantcol = display_of(e.lines[r->fy], r->fx);
+		type_counted(r->count, r->keys);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->ty, e.cy, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->tx, e.cx, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(0, e.pending.count, msg);
+		TEST_ASSERT_EQUAL_INT_MESSAGE(0, e.modified, msg);
+		press('j');
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->jy, e.cy, msg);
+		TEST_ASSERT_EQUAL_UINT_MESSAGE(r->jx, e.cx, msg);
+	}
+}
+
+/** @brief On an editor with no lines "{", "}" and "%" give (0, 0) and the keys do nothing; they return non-zero only when the cursor moved. */
+static void test_blocks_on_an_empty_editor_and_return_values(void) {
+	editor_init(&e);
+	for (const char *k = "{}%"; *k; k++) {
+		motion_pos_t t = run_block(*k);
+		TEST_ASSERT_EQUAL_UINT(0, t.y);
+		TEST_ASSERT_EQUAL_UINT(0, t.x);
+		TEST_ASSERT_EQUAL_INT(0, press(*k));
+	}
+	load_from(block_buffers, 0, 0, 0);
+	TEST_ASSERT_EQUAL_INT(1, press('}'));
+	TEST_ASSERT_EQUAL_INT(1, press('{'));
+	TEST_ASSERT_EQUAL_INT(0, press('{')); /* at the start of the text */
+	TEST_ASSERT_EQUAL_INT(0, press('%')); /* no bracket */
+}
+
+/** @brief "{", "}" and "%" are normal mode only: in insert mode they are typed, in command mode they go to the command line. */
+static void test_blocks_are_normal_mode_only(void) {
+	load_from(block_buffers, 6, 0, 0);
+	press('i');
+	type_keys("%{}");
+	TEST_ASSERT_EQUAL_STRING("%{}f(a[1], {b})", e.lines[0]);
+	TEST_ASSERT_EQUAL_UINT(0, e.cy);
+	press(KEY_ESC);
+	press(':');
+	type_keys("}%");
+	TEST_ASSERT_EQUAL_STRING("}%", e.cmd.text);
+}
+
+/** @brief Fill the shared editor with @p n lines "x", a window of @p h lines and the cursor on line @p cy with the window at @p rowoff. */
+static void page(size_t n, size_t h, size_t rowoff, size_t cy) {
+	editor_free(&e);
+	editor_init(&e);
+	for (size_t i = 0; i < n; i++) TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "x"));
+	editor_set_window_height(&e, h);
+	e.rowoff = rowoff;
+	e.cy = cy;
+}
+
+/** @brief Assert the window top and the cursor line after a page key. */
+#define ASSERT_PAGE(want_top, want_cy) do { TEST_ASSERT_EQUAL_UINT(want_top, e.rowoff); TEST_ASSERT_EQUAL_UINT(want_cy, e.cy); TEST_ASSERT_EQUAL_INT(0, e.modified); } while (0)
+
+/** @brief Ctrl+f scrolls forward h - 2 lines (two lines of overlap) and puts the cursor on the first line of the window, for several window heights. */
+static void test_ctrl_f_scrolls_a_page_minus_two_lines(void) {
+	page(100, 10, 0, 0);
+	TEST_ASSERT_EQUAL_INT(1, press(0x06));
+	ASSERT_PAGE(8, 8);
+	press(0x06);
+	ASSERT_PAGE(16, 16);
+	page(100, 23, 0, 5);
+	press(0x06);
+	ASSERT_PAGE(21, 21);
+	page(100, 5, 0, 0);
+	press(0x06);
+	ASSERT_PAGE(3, 3);
+	page(100, 10, 0, 5); /* a cursor already below the new top stays */
+	press(0x06);
+	ASSERT_PAGE(8, 8);
+	page(100, 10, 0, 9);
+	press(0x06);
+	ASSERT_PAGE(8, 9);
+	page(100, 2, 0, 0); /* a window of 2 or 1 lines still moves one line */
+	press(0x06);
+	ASSERT_PAGE(1, 1);
+	page(100, 1, 0, 0);
+	press(0x06);
+	ASSERT_PAGE(1, 1);
+}
+
+/** @brief Ctrl+b scrolls back h - 2 lines and puts the cursor on the last line of the window if it is below it. */
+static void test_ctrl_b_scrolls_a_page_back(void) {
+	page(100, 10, 50, 50);
+	TEST_ASSERT_EQUAL_INT(1, press(0x02));
+	ASSERT_PAGE(42, 50);
+	page(100, 10, 50, 59);
+	press(0x02);
+	ASSERT_PAGE(42, 51);
+	page(100, 10, 5, 7);
+	press(0x02);
+	ASSERT_PAGE(0, 7);
+	page(100, 5, 50, 54);
+	press(0x02);
+	ASSERT_PAGE(47, 51);
+}
+
+/** @brief Ctrl+f and Ctrl+b stop at the ends: the window top never passes the last line nor goes below 0, and a key that changes nothing returns 0. */
+static void test_ctrl_f_and_ctrl_b_stop_at_the_buffer_ends(void) {
+	page(100, 10, 93, 95);
+	TEST_ASSERT_EQUAL_INT(1, press(0x06));
+	ASSERT_PAGE(99, 99);
+	TEST_ASSERT_EQUAL_INT(0, press(0x06));
+	ASSERT_PAGE(99, 99);
+	page(100, 10, 3, 5);
+	TEST_ASSERT_EQUAL_INT(1, press(0x02));
+	ASSERT_PAGE(0, 5);
+	TEST_ASSERT_EQUAL_INT(0, press(0x02));
+	ASSERT_PAGE(0, 5);
+	page(1, 10, 0, 0);
+	TEST_ASSERT_EQUAL_INT(0, press(0x06));
+	TEST_ASSERT_EQUAL_INT(0, press(0x02));
+	TEST_ASSERT_EQUAL_INT(0, press(0x04));
+	TEST_ASSERT_EQUAL_INT(0, press(0x15));
+}
+
+/** @brief A buffer shorter than the window does not scroll: Ctrl+f goes to the last line, Ctrl+b to the first, Ctrl+d and Ctrl+u move the cursor only. */
+static void test_page_keys_on_a_buffer_shorter_than_the_window(void) {
+	page(5, 10, 0, 1);
+	press(0x06);
+	ASSERT_PAGE(0, 4);
+	press(0x02);
+	ASSERT_PAGE(0, 0);
+	page(5, 10, 0, 0);
+	press(0x04);
+	ASSERT_PAGE(0, 4);
+	press(0x15);
+	ASSERT_PAGE(0, 0);
+	page(10, 10, 0, 0); /* exactly as long as the window */
+	press(0x06);
+	ASSERT_PAGE(0, 9);
+}
+
+/** @brief Ctrl+d scrolls half a window and moves the cursor as far; at the end the window stops with the last line at its bottom and only the cursor moves. Ctrl+u mirrors it. */
+static void test_ctrl_d_and_ctrl_u_scroll_half_a_window(void) {
+	page(100, 10, 0, 0);
+	TEST_ASSERT_EQUAL_INT(1, press(0x04));
+	ASSERT_PAGE(5, 5);
+	press(0x04);
+	ASSERT_PAGE(10, 10);
+	press(0x15);
+	ASSERT_PAGE(5, 5);
+	page(100, 10, 3, 7);
+	press(0x15);
+	ASSERT_PAGE(0, 2);
+	page(100, 11, 0, 0); /* an odd height: half rounds down */
+	press(0x04);
+	ASSERT_PAGE(5, 5);
+	page(100, 10, 85, 90);
+	press(0x04);
+	ASSERT_PAGE(90, 95);
+	press(0x04);
+	ASSERT_PAGE(90, 99);
+	TEST_ASSERT_EQUAL_INT(0, press(0x04));
+	page(100, 10, 0, 3);
+	press(0x15);
+	ASSERT_PAGE(0, 0);
+	TEST_ASSERT_EQUAL_INT(0, press(0x15));
+}
+
+/** @brief A count is pages for Ctrl+f and Ctrl+b, and the lines of Ctrl+d and Ctrl+u, which then stay as the new scroll amount; the count is used up. */
+static void test_page_keys_with_counts(void) {
+	page(100, 10, 0, 0);
+	type_keys("2\x06");
+	ASSERT_PAGE(16, 16);
+	TEST_ASSERT_EQUAL_UINT(0, e.pending.count);
+	page(100, 10, 49, 49);
+	type_keys("2\x02");
+	ASSERT_PAGE(33, 42);
+	page(100, 10, 0, 0);
+	type_keys("3\x04");
+	ASSERT_PAGE(3, 3);
+	press(0x04);
+	ASSERT_PAGE(6, 6);
+	type_keys("2\x15");
+	ASSERT_PAGE(4, 4);
+	press(0x15);
+	ASSERT_PAGE(2, 2);
+	page(100, 10, 0, 0);
+	type_keys("100\x06"); /* more pages than lines: the end */
+	ASSERT_PAGE(99, 99);
+}
+
+/** @brief After a page key the cursor is on the first non-blank of its line and the wanted column follows ("j" stays there). */
+static void test_page_keys_put_the_cursor_on_the_first_non_blank(void) {
+	editor_free(&e);
+	editor_init(&e);
+	for (size_t i = 0; i < 100; i++) TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, i % 2 ? "  \tab" : "abcdef"));
+	editor_set_window_height(&e, 10);
+	e.cx = 4;
+	press(0x04); /* cursor on line 5, "  \tab" */
+	TEST_ASSERT_EQUAL_UINT(3, e.cx);
+	TEST_ASSERT_EQUAL_UINT(8, e.wantcol); /* the tab takes the columns up to 8 */
+	press(0x04);
+	TEST_ASSERT_EQUAL_UINT(10, e.cy);
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
+	TEST_ASSERT_EQUAL_UINT(0, e.wantcol);
+}
+
+/** @brief Page keys do nothing without a known window height or without lines. */
+static void test_page_keys_need_a_window_height_and_lines(void) {
+	page(100, 0, 0, 0);
+	for (const char *k = "\x06\x02\x04\x15"; *k; k++) TEST_ASSERT_EQUAL_INT(0, press(*k));
+	ASSERT_PAGE(0, 0);
+	editor_free(&e);
+	editor_init(&e);
+	editor_set_window_height(&e, 10);
+	for (const char *k = "\x06\x02\x04\x15"; *k; k++) TEST_ASSERT_EQUAL_INT(0, press(*k));
+}
+
+/** @brief The window height used is the last one given, and it survives loading text into the editor (a resize between keys changes the page). */
+static void test_page_keys_use_the_latest_window_height(void) {
+	page(100, 10, 0, 0);
+	press(0x06);
+	ASSERT_PAGE(8, 8);
+	editor_set_window_height(&e, 5);
+	press(0x06);
+	ASSERT_PAGE(11, 11);
+	editor_free(&e);
+	TEST_ASSERT_EQUAL_UINT(5, e.winrows);
+}
+
+/** @brief Page keys are normal mode only: in insert mode they are dropped as other control keys, in command mode ignored; Ctrl+Q still quits. */
+static void test_page_keys_are_normal_mode_only(void) {
+	page(100, 10, 0, 0);
+	press('i');
+	for (const char *k = "\x06\x02\x04\x15"; *k; k++) press(*k);
+	ASSERT_PAGE(0, 0);
+	TEST_ASSERT_EQUAL_STRING("x", e.lines[0]);
+	press(KEY_ESC);
+	press(':');
+	for (const char *k = "\x06\x02\x04\x15"; *k; k++) press(*k);
+	TEST_ASSERT_EQUAL_STRING("", e.cmd.text);
+	TEST_ASSERT_EQUAL_UINT(0, e.cy);
+	press(KEY_ESC);
+	press(0x11);
+	TEST_ASSERT_EQUAL_INT(1, e.quit);
+}
+
+/** @brief A page key after "g" is dropped with it (as any key that is not "g"); one after a count uses it up; the scroll a page key makes needs no correction by editor_scroll(). */
+static void test_page_keys_end_a_pending_command_and_leave_the_window_alone(void) {
+	page(100, 10, 0, 0);
+	press('g');
+	TEST_ASSERT_EQUAL_INT(0, press(0x06));
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix);
+	ASSERT_PAGE(0, 0);
+	press(0x06);
+	ASSERT_PAGE(8, 8);
+	editor_scroll(&e, 10);
+	ASSERT_PAGE(8, 8);
+	press(0x04);
+	editor_scroll(&e, 10);
+	ASSERT_PAGE(13, 13);
+}
+
 /** @brief Run the motion tests. */
 void test_motions_suite(void) {
 	RUN_TEST(test_motions_match_vim_on_every_start);
@@ -655,4 +965,19 @@ void test_motions_suite(void) {
 	RUN_TEST(test_a_count_before_z_is_dropped);
 	RUN_TEST(test_counted_and_line_jumps_scroll_the_window);
 	RUN_TEST(test_g_sets_the_wanted_column_from_the_first_non_blank);
+	RUN_TEST(test_paragraph_and_bracket_motions_match_vim);
+	RUN_TEST(test_paragraph_and_bracket_keys_match_vim);
+	RUN_TEST(test_blocks_on_an_empty_editor_and_return_values);
+	RUN_TEST(test_blocks_are_normal_mode_only);
+	RUN_TEST(test_ctrl_f_scrolls_a_page_minus_two_lines);
+	RUN_TEST(test_ctrl_b_scrolls_a_page_back);
+	RUN_TEST(test_ctrl_f_and_ctrl_b_stop_at_the_buffer_ends);
+	RUN_TEST(test_page_keys_on_a_buffer_shorter_than_the_window);
+	RUN_TEST(test_ctrl_d_and_ctrl_u_scroll_half_a_window);
+	RUN_TEST(test_page_keys_with_counts);
+	RUN_TEST(test_page_keys_put_the_cursor_on_the_first_non_blank);
+	RUN_TEST(test_page_keys_need_a_window_height_and_lines);
+	RUN_TEST(test_page_keys_use_the_latest_window_height);
+	RUN_TEST(test_page_keys_are_normal_mode_only);
+	RUN_TEST(test_page_keys_end_a_pending_command_and_leave_the_window_alone);
 }

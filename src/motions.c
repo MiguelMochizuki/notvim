@@ -173,3 +173,62 @@ motion_pos_t motion_word_end(const editor_t *e, int big) {
 	step_back(e, &pos); /* overshot by one */
 	return pos;
 }
+
+/** @brief Whether line @p y is empty (length 0; a line of blanks is not). */
+static int empty_line(const editor_t *e, size_t y) {
+	return e->lines[y][0] == '\0';
+}
+
+motion_pos_t motion_paragraph_next(const editor_t *e) {
+	motion_pos_t pos = cursor(e);
+	if (!e->count) return pos;
+	size_t y = e->cy;
+	while (y < e->count && empty_line(e, y)) y++;
+	while (y < e->count && !empty_line(e, y)) y++;
+	if (y < e->count) return (motion_pos_t){ y, 0 };
+	return on_char(e, (motion_pos_t){ e->count - 1, strlen(e->lines[e->count - 1]) });
+}
+
+motion_pos_t motion_paragraph_prev(const editor_t *e) {
+	motion_pos_t pos = cursor(e);
+	if (!e->count) return pos;
+	size_t y = e->cy;
+	while (y > 0 && empty_line(e, y)) y--;
+	while (y > 0 && !empty_line(e, y)) y--;
+	return (motion_pos_t){ y, 0 };
+}
+
+motion_pos_t motion_bracket_match(const editor_t *e) {
+	motion_pos_t start = cursor(e);
+	if (!e->count) return start;
+	static const char pairs[] = "()[]{}";
+	const char *line = e->lines[e->cy];
+	size_t x = e->cx;
+	while (line[x] && !strchr(pairs, line[x])) x++; /* a bracket is ASCII: never inside a multibyte character */
+	if (!line[x]) return start;
+	const char *at = strchr(pairs, line[x]);
+	int forward = (at - pairs) % 2 == 0;
+	char open = forward ? *at : at[-1], close = forward ? at[1] : *at;
+	size_t y = e->cy, depth = 0;
+	for (;;) {
+		const char *l = e->lines[y];
+		if (forward) {
+			for (; l[x]; x++) {
+				if (l[x] == open) depth++;
+				else if (l[x] == close && --depth == 0) return (motion_pos_t){ y, x };
+			}
+			if (++y >= e->count) return start;
+			x = 0;
+		} else {
+			for (;; x--) {
+				if (l[x] == close) depth++;
+				else if (l[x] == open && --depth == 0) return (motion_pos_t){ y, x };
+				if (x == 0) break;
+			}
+			if (y-- == 0) return start;
+			x = strlen(e->lines[y]);
+			if (x == 0) continue;
+			x--;
+		}
+	}
+}

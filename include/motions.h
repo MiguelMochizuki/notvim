@@ -63,4 +63,20 @@ motion_pos_t motion_word_end(const editor_t *e, int big);
  */
 motion_pos_t motion_goto_line(const editor_t *e, size_t n);
 
+/**
+ * @brief "}": the next empty line (a line of length 0; a line of blanks is not empty) after the run of empty lines at the cursor, or the last character of the last line if there is none.
+ */
+motion_pos_t motion_paragraph_next(const editor_t *e);
+
+/**
+ * @brief "{": the previous empty line before the cursor line (skipping the empty lines right before it), or (0, 0) if there is none.
+ */
+motion_pos_t motion_paragraph_prev(const editor_t *e);
+
+/**
+ * @brief "%": the match of the first bracket "( ) [ ] { }" at or after the cursor on its line, over line boundaries and nesting of its own kind only; strings and comments are not special.
+ * @return The position of the match, or the cursor if there is no bracket in the rest of the line or no match.
+ */
+motion_pos_t motion_bracket_match(const editor_t *e);
+
 #endif

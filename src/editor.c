@@ -24,6 +24,8 @@ void editor_init(editor_t *e) {
 	e->pend_len = 0;
 	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
+	e->winrows = 0;
+	e->scroll = 0;
 	e->cy = 0;
 	e->cx = 0;
 	e->rowoff = 0;
@@ -38,7 +40,9 @@ void editor_free(editor_t *e) {
 	free(e->msg);
 	for (size_t i = 0; i < e->count; i++) free(e->lines[i]);
 	free(e->lines);
+	size_t winrows = e->winrows; /* the window does not change when its text does */
 	editor_init(e);
+	e->winrows = winrows;
 }
 
 size_t editor_line_count(const editor_t *e) {
@@ -607,6 +611,71 @@ static motion_pos_t repeat_word(editor_t *e, int key, size_t n) {
 	return t;
 }
 
+/** @brief Whether the paragraph step from the cursor to @p t ran off the end of the text: it landed on a non-empty line (the clamp) or passed no non-empty line before an empty one. */
+static int ran_off(const editor_t *e, motion_pos_t t) {
+	if (e->lines[t.y][0] != '\0') return 1;
+	for (size_t y = e->cy < t.y ? e->cy : t.y; y <= (e->cy > t.y ? e->cy : t.y); y++)
+		if (e->lines[y][0] != '\0') return 0;
+	return 1;
+}
+
+/** @brief The target of "{" ("}" if @p forward) repeated @p n times; as in Vim the whole count fails (the cursor stays) if a step before the last runs off the end of the text. The cursor is left where it was. */
+static motion_pos_t repeat_paragraph(editor_t *e, int forward, size_t n) {
+	size_t y = e->cy, x = e->cx;
+	motion_pos_t t = { y, x };
+	for (; n && e->count; n--) {
+		motion_pos_t step = forward ? motion_paragraph_next(e) : motion_paragraph_prev(e);
+		if (ran_off(e, step) && n > 1) { /* Vim's findpar() fails when a step runs off the end, unless it is the last step */
+			t = (motion_pos_t){ y, x };
+			break;
+		}
+		t = step;
+		e->cy = t.y;
+		e->cx = t.x;
+	}
+	e->cy = y;
+	e->cx = x;
+	return t;
+}
+
+/**
+ * @brief The page keys (see editor_handle_key()): scroll the window and move the cursor with it.
+ * @param key 0x06 (Ctrl+f), 0x02 (Ctrl+b), 0x04 (Ctrl+d) or 0x15 (Ctrl+u).
+ * @param n   The count, 0 for none.
+ * @return Non-zero if the window or the cursor moved.
+ */
+static int page_key(editor_t *e, int key, size_t n) {
+	size_t h = e->winrows, last = e->count ? e->count - 1 : 0;
+	if (h == 0 || e->count == 0) return 0;
+	size_t top = e->rowoff, cy = e->cy;
+	int fits = e->count <= h; /* the whole text is in the window: nothing to scroll */
+	if (key == 0x06 || key == 0x02) {
+		size_t by = (n ? n : 1) * (h > 3 ? h - 2 : 1);
+		if (key == 0x06) {
+			if (!fits) top = by > last - top ? last : top + by;
+			cy = fits ? last : cy < top ? top : cy;
+		} else {
+			if (!fits) top = by > top ? 0 : top - by;
+			cy = fits ? 0 : cy > top + h - 1 ? top + h - 1 : cy;
+		}
+	} else {
+		if (n) e->scroll = n;
+		size_t by = e->scroll ? e->scroll : h / 2 ? h / 2 : 1;
+		size_t maxtop = fits ? 0 : e->count - h;
+		if (key == 0x04) {
+			if (top < maxtop) top = by > maxtop - top ? maxtop : top + by;
+			cy = by > last - cy ? last : cy + by;
+		} else {
+			top = by > top ? 0 : top - by;
+			cy = by > cy ? 0 : cy - by;
+		}
+	}
+	if (top == e->rowoff && cy == e->cy) return 0;
+	e->rowoff = top;
+	goto_target(e, motion_goto_line(e, cy + 1), 0);
+	return 1;
+}
+
 /** @brief "{n}$": n-1 lines down, then the end of that line; Vim fails on the last line (the cursor stays) but still wants the end for "j" and "k". */
 static int goto_line_end(editor_t *e, size_t n) {
 	if (n > 1 && !repeat_move(e, EDITOR_MOVE_DOWN, n - 1)) {
@@ -663,6 +732,9 @@ static int handle_key(editor_t *e, int key) {
 	case '^': return goto_target(e, motion_first_nonblank(e), 0);
 	case '$': return goto_line_end(e, n);
 	case 'w': case 'W': case 'b': case 'B': case 'e': case 'E': return goto_target(e, repeat_word(e, key, n), 0);
+	case '{': case '}': return goto_target(e, repeat_paragraph(e, key == '}', n), 0);
+	case '%': return goto_target(e, motion_bracket_match(e), 0);
+	case 0x06: case 0x02: case 0x04: case 0x15: return page_key(e, key, pend.count);
 	case 'G': return goto_target(e, motion_goto_line(e, pend.count), 0);
 	case 'g':
 		e->pending = (editor_pending_t){ 'g', pend.count };
@@ -687,6 +759,10 @@ static int handle_key(editor_t *e, int key) {
 	}
 	repeat_move(e, dir, n);
 	return 1; /* as before counts: a move key always asks for a redraw, even at an end of the text */
+}
+
+void editor_set_window_height(editor_t *e, size_t height) {
+	e->winrows = height;
 }
 
 int editor_handle_key(editor_t *e, int key) {

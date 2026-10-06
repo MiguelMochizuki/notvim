@@ -1,6 +1,6 @@
 #!/bin/sh
-# Regenerates tests/motions_vim.inc and tests/counts_vim.inc from the real Vim (vim -Nu NONE -es, in a scratch
-# directory, never on a repo file). Needs vim on the PATH; changes nothing but the two .inc files.
+# Regenerates tests/motions_vim.inc, counts_vim.inc and blocks_vim.inc from the real Vim (vim -Nu NONE -es, in a scratch
+# directory, never on a repo file). Needs vim on the PATH; changes nothing but the three .inc files.
 # Usage: tests/gen-vim-data.sh        (from anywhere; then review the diff and run make test)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -78,8 +78,59 @@ for b in sort(keys(starts), 'n')
   endfor
 endfor
 call writefile(out, g:counts_out)
+" blocks_vim.inc: "{" "}" and "%": {buffer, key, count (0 = none), from line, from byte, to line, to byte, line and byte after a j that follows}.
+let qbufs = [
+\ ["a", "b", "", "c", "d", "", "", "e", "  ", "f"],
+\ ["", "", "a"],
+\ ["a", ""],
+\ ["a"],
+\ [""],
+\ ["  x", "", "  y  z", " "],
+\ ["f(a[1], {b})", "  if (x) {", "    y(z);", "  }", "end)"],
+\ ["(a", "b", "c)"],
+\ ["((a)", "b)", ")"],
+\ ["x(h\xc3\xa9llo)y", "[\xc3\xa9]"],
+\ ["no brackets", ""],
+\ ["  ( )", "}{"],
+\ ]
+" Not here: Vim's "%" also skips brackets inside double quotes and pairs "/*" with "*/" and "#if" with "#endif"; notvim does not (a known gap).
+func Starts2(b)
+  let r = []
+  for y in range(len(g:qbufs[a:b]))
+    let l = g:qbufs[a:b][y]
+    for x in range(len(l))
+      if and(char2nr(l[x]), 0xc0) != 0x80 | call add(r, [y, x]) | endif
+    endfor
+    if l == '' | call add(r, [y, 0]) | endif
+  endfor
+  return r
+endfunc
+func Run2(b, y, x, cmd, ...)
+  silent %delete _
+  call setline(1, g:qbufs[a:b])
+  call cursor(a:y + 1, a:x + 1)
+  execute 'normal! ' . a:cmd
+  if a:0 | execute 'normal! ' . a:1 | endif
+  return [line('.') - 1, col('.') - 1]
+endfunc
+let out = ['/* Generated from the real Vim 9.1 by gen-vim-data.sh (vim -Nu NONE -es; one :normal! per count and key, then one for j):',
+\ ' * {buffer, key, count (0 = none), from line, from byte, to line, to byte, line and byte after a j that follows}. Included by test_motions.c. */']
+for b in range(len(qbufs))
+  for key in ['{', '}', '%']
+    let row = []
+    for n in (key == '%' ? [0] : [0, 2, 3, 100])
+      for s in Starts2(b)
+        let t = Run2(b, s[0], s[1], (n ? n : '') . key)
+        let u = Run2(b, s[0], s[1], (n ? n : '') . key, 'j')
+        call add(row, printf('{%d,"%s",%d,%d,%d,%d,%d,%d,%d}', b, key, n, s[0], s[1], t[0], t[1], u[0], u[1]))
+      endfor
+    endfor
+    call add(out, "\t" . join(row, ', ') . ',')
+  endfor
+endfor
+call writefile(out, g:blocks_out)
 qa!
 VIM
-vim -Nu NONE -es -c "let g:motions_out='$work/motions_vim.inc'" -c "let g:counts_out='$work/counts_vim.inc'" -S "$work/gen.vim" </dev/null >/dev/null 2>&1 || true
-[ -s "$work/motions_vim.inc" ] && [ -s "$work/counts_vim.inc" ] || { echo "vim produced no data" >&2; exit 1; }
-cp "$work/motions_vim.inc" "$work/counts_vim.inc" "$here/"
+vim -Nu NONE -es -c "let g:motions_out='$work/motions_vim.inc'" -c "let g:counts_out='$work/counts_vim.inc'" -c "let g:blocks_out='$work/blocks_vim.inc'" -S "$work/gen.vim" </dev/null >/dev/null 2>&1 || true
+[ -s "$work/motions_vim.inc" ] && [ -s "$work/counts_vim.inc" ] && [ -s "$work/blocks_vim.inc" ] || { echo "vim produced no data" >&2; exit 1; }
+cp "$work/motions_vim.inc" "$work/counts_vim.inc" "$work/blocks_vim.inc" "$here/"

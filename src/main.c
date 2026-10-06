@@ -34,8 +34,8 @@ typedef struct {
 	size_t size; /**< Size of @ref buf in bytes, from draw_buffer_size(). */
 } screen_t;
 
-/** @brief Read the terminal size and (re)allocate the buffer for it; on failure @p s keeps its old size and buffer and -1 is returned. */
-static int screen_fit(screen_t *s) {
+/** @brief Read the terminal size, (re)allocate the buffer for it and tell @p e the window height; on failure @p s keeps its old size and buffer and -1 is returned. */
+static int screen_fit(screen_t *s, editor_t *e) {
 	int rows, cols;
 	terminal_get_size(STDOUT_FILENO, &rows, &cols);
 	size_t size = draw_buffer_size(rows, cols);
@@ -45,6 +45,7 @@ static int screen_fit(screen_t *s) {
 	s->size = size;
 	s->rows = rows;
 	s->cols = cols;
+	editor_set_window_height(e, editor_text_rows((size_t)rows)); /* the one place the editor learns the window height: startup and every resize */
 	return 0;
 }
 
@@ -120,7 +121,7 @@ int main(int argc, char **argv) {
 	atexit(cleanup);
 
 	screen_t screen = { 0, 0, NULL, 0 };
-	if (screen_fit(&screen) < 0) {
+	if (screen_fit(&screen, &e) < 0) {
 		fprintf(stderr, "notvim: %s\n", strerror(ENOMEM));
 		return 1;
 	}
@@ -151,7 +152,7 @@ int main(int argc, char **argv) {
 			break; /* SIGINT, SIGTERM or SIGHUP: leave through the normal exit so the terminal is restored */
 		} else if (pfds[2].revents & POLLIN) {
 			winch_drain();
-			if (screen_fit(&screen) < 0) continue; /* keep the old size and buffer: they still match each other */
+			if (screen_fit(&screen, &e) < 0) continue; /* keep the old size and buffer: they still match each other */
 			screen_scroll(&screen, &e);
 			if (screen_draw(&screen, &e) < 0) {
 				write_failed = 1;

@@ -45,6 +45,9 @@ typedef struct {
 	                     back to its column after a shorter line. Set by a left or right move that moves, by a motion key (@ref EDITOR_WANTCOL_EOL after "$"); 0 after init, free
 	                     and load. @c cx and @c wantcol change together in editor_move_cursor(): code that assigns @c cx
 	                     directly must set @c wantcol too. */
+	size_t winrows; /**< Height of the text window in lines, as last given to editor_set_window_height(); 0 (after init) means unknown and the page keys do nothing.
+	                     Kept across free and load. */
+	size_t scroll;  /**< Vim's 'scroll': the lines "Ctrl+d" and "Ctrl+u" move; set by a count given to either key, 0 (after init, free and load) means half the window. */
 	editor_mode_t mode; /**< Current mode; @ref EDITOR_MODE_NORMAL after init, free and load. In insert mode @c cx may equal the
 	                         length of the line (the cursor is after the last character); in normal mode it never does. */
 	int modified; /**< Non-zero once the text has been changed (any edit: typing, Enter, Backspace, Delete); 0 after init, free and
@@ -188,6 +191,16 @@ int editor_append_line(editor_t *e, const char *text);
 void editor_move_cursor(editor_t *e, editor_move_t dir);
 
 /**
+ * @brief Tell the editor the height of the text window, which the page keys ("Ctrl+f", "Ctrl+b", "Ctrl+d", "Ctrl+u") need.
+ *
+ * The one place the height is kept: the program calls it at startup and after every resize with editor_text_rows() of the terminal height.
+ *
+ * @param e      Editor to modify; must not be NULL.
+ * @param height Lines of text the window shows; 0 means unknown.
+ */
+void editor_set_window_height(editor_t *e, size_t height);
+
+/**
  * @brief Handle one key (from key_parser_feed()) in the current mode.
  *
  * Normal mode: 'i' enters insert mode with the cursor where it is; the arrow keys and h/j/k/l move the cursor with
@@ -228,6 +241,19 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * "g" waits for a second key: anything but "g" (Esc too) is dropped with it, and with the count. The typed count is not
  * shown. Every key that does not continue the command, and Esc, clear the count; counts and "g" do nothing in insert and
  * command mode, where they are typed. Typing a digit or "g" returns 0 (nothing to redraw).
+ *
+ * Paragraphs and brackets (normal mode): "}" and "{" go to the next and previous empty line and "%" to the matching bracket (see motions.h).
+ * "}" and "{" repeat with a count, and the whole command fails (the cursor stays) if a step before the last finds nothing more, as in Vim; "%" ignores a count and does nothing without a match. @c wantcol is set from the target
+ * as for the other motions, even if the cursor does not move; they return non-zero only if the cursor moved and never set @c modified.
+ *
+ * Page keys (normal mode, window height from editor_set_window_height(); h is that height, the window has the lines @c rowoff to @c rowoff + h - 1; with a height of
+ * 0 or no lines they do nothing). The ruling comes from Vim's documentation, because Vim's -es mode has a window height but does not scroll: "Ctrl+f" (0x06)
+ * scrolls forward {count} pages of h - 2 lines (at least 1): @c rowoff grows by that, but never past the last line, and stays 0 if the whole text
+ * fits in the window; the cursor goes to the first line of the window if it is above it. "Ctrl+b" (0x02) scrolls back the same, @c rowoff not below 0, and the cursor goes to the last
+ * line of the window if it is below it. "Ctrl+d" (0x04) and "Ctrl+u" (0x15) scroll down and up @c scroll lines (a count sets it; with none set, h / 2, at least 1) and
+ * move the cursor the same number of lines; "Ctrl+d" scrolls at most until the last line is the last of the window and then only the cursor moves, "Ctrl+u" stops at @c rowoff 0 and
+ * line 0; the cursor stops at the last and first line. After a page key the cursor is on the first non-blank of its line and @c wantcol is set from it ('startofline'). A key that
+ * changes neither @c rowoff nor the cursor (already at an end) does nothing and returns 0; a changing one returns non-zero. They never set @c modified; in insert and command mode they are dropped as before.
  *
  * Quitting: in normal mode "Z" sets @c pending.prefix and returns 0; the next key then clears it and, if it is 'Z' or 'Q', runs
  * ":x" or ":q!" (see commands_run()); any other key is handled as if "Z" had not been typed. In insert and command mode

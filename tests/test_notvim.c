@@ -495,6 +495,53 @@ static void test_notvim_counts_gg_and_g_move_the_cursor(void) {
 	}
 }
 
+/** @brief Ctrl+f and Ctrl+d scroll by pages in the real program, and after a resize the next page uses the new window height. */
+static void test_notvim_page_keys_scroll_and_follow_a_resize(void) {
+	int master, raw;
+	char first[4096], resized[4096], second[4096], half[4096], expected_first[2048];
+	pid_t pid = spawn_resize_notvim(11, &master, &raw); /* 10 text rows */
+	send_and_read(master, "\x06", first, sizeof(first));
+	resize_screen(expected_first, sizeof(expected_first), 9, 18, 40, 1); /* the window moved 8 lines: 2 lines of overlap; built before the pty size changes */
+	set_size(master, 6, 80); /* 5 text rows */
+	read_output(master, resized, sizeof(resized));
+	send_and_read(master, "\x06", second, sizeof(second));
+	send_and_read(master, "\x04", half, sizeof(half));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	char expected[2048];
+	TEST_ASSERT_EQUAL_STRING(expected_first, first);
+	resize_screen(expected, sizeof(expected), 9, 13, 40, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, resized);
+	resize_screen(expected, sizeof(expected), 12, 16, 40, 1); /* a page of 3 lines now */
+	TEST_ASSERT_EQUAL_STRING(expected, second);
+	resize_screen(expected, sizeof(expected), 14, 18, 40, 1); /* half of 5 lines is 2 */
+	TEST_ASSERT_EQUAL_STRING(expected, half);
+}
+
+/** @brief "}", "{" and "%" move the cursor in the real program. */
+static void test_notvim_paragraph_and_bracket_motions_move_the_cursor(void) {
+	const char *path = tmpdir_write("blocks.txt", "a(b\nc)\n\nd\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char out[2048], expected[2048];
+	pid_t pid = spawn_notvim(path, 6, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	char at_match[2048], at_blank[2048];
+	send_and_read(master, "%", at_match, sizeof(at_match));
+	send_and_read(master, "}", at_blank, sizeof(at_blank));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	screen_at(expected, sizeof(expected), "a(b\r\nc)\r\n\r\nd", 2, 2, 2, 2);
+	TEST_ASSERT_EQUAL_STRING(expected, at_match);
+	screen_at(expected, sizeof(expected), "a(b\r\nc)\r\n\r\nd", 3, 1, 3, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, at_blank);
+}
+
 /** @brief After "$", j keeps to the end of each line on a pty. */
 static void test_notvim_dollar_then_j_keeps_to_the_end(void) {
 	const char *path = tmpdir_write("eol.txt", "abcdef\nab\nabcdefgh\n");
@@ -2298,6 +2345,8 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_line_and_word_motions_move_the_cursor);
 	RUN_TEST(test_notvim_counts_gg_and_g_move_the_cursor);
 	RUN_TEST(test_notvim_dollar_then_j_keeps_to_the_end);
+	RUN_TEST(test_notvim_page_keys_scroll_and_follow_a_resize);
+	RUN_TEST(test_notvim_paragraph_and_bracket_motions_move_the_cursor);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);
 	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);
