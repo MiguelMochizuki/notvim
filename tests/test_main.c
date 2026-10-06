@@ -11,6 +11,7 @@
 #include "test_stopsig.h"
 #include "test_winch.h"
 #include "test_utf8.h"
+#include "test_motions.h"
 #include "test_tmpdir.h"
 #include "test_writer.h"
 #include "tmpdir.h"
@@ -21,6 +22,7 @@ void setUp(void) { tmpdir_create(); }
 void tearDown(void) {
 	test_editor_teardown();
 	test_writer_teardown();
+	test_motions_teardown();
 	tmpdir_destroy();
 }
 
@@ -33,6 +35,7 @@ int main(void) {
 	test_stopsig_suite();
 	test_winch_suite();
 	test_utf8_suite();
+	test_motions_suite();
 	test_terminal_suite();
 	test_writer_suite();
 	test_notvim_suite();

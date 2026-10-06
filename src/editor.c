@@ -10,6 +10,7 @@
 #include "editor.h"
 #include "commands.h"
 #include "keys.h"
+#include "motions.h"
 #include "utf8.h"
 
 void editor_init(editor_t *e) {
@@ -556,6 +557,21 @@ static void leave_insert(editor_t *e) {
 	e->wantcol = display_col(e->lines[e->cy], e->cx);
 }
 
+/**
+ * @brief Put the cursor on motion target @p t and set the wanted column from it, or to the end of every line if @p to_eol.
+ *
+ * The wanted column is set even when the cursor does not move, as in Vim.
+ * @return Non-zero if the cursor moved (the screen needs a redraw).
+ */
+static int goto_target(editor_t *e, motion_pos_t t, int to_eol) {
+	if (e->count == 0) return 0;
+	int moved = t.y != e->cy || t.x != e->cx;
+	e->cy = t.y;
+	e->cx = t.x;
+	e->wantcol = to_eol ? EDITOR_WANTCOL_EOL : display_col(e->lines[t.y], t.x);
+	return moved;
+}
+
 /** @brief editor_handle_key() without the message: the message was cleared by the caller. */
 static int handle_key(editor_t *e, int key) {
 	editor_move_t dir;
@@ -591,6 +607,12 @@ static int handle_key(editor_t *e, int key) {
 	case 'k': case 'j': case 'h': case 'l':
 		dir = key == 'k' ? EDITOR_MOVE_UP : key == 'j' ? EDITOR_MOVE_DOWN : key == 'h' ? EDITOR_MOVE_LEFT : EDITOR_MOVE_RIGHT;
 		break;
+	case '0': return goto_target(e, motion_line_start(e), 0);
+	case '^': return goto_target(e, motion_first_nonblank(e), 0);
+	case '$': return goto_target(e, motion_line_end(e), 1);
+	case 'w': case 'W': return goto_target(e, motion_word_next(e, key == 'W'), 0);
+	case 'b': case 'B': return goto_target(e, motion_word_prev(e, key == 'B'), 0);
+	case 'e': case 'E': return goto_target(e, motion_word_end(e, key == 'E'), 0);
 	case 'i':
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;

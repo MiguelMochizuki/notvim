@@ -15,6 +15,9 @@ typedef enum {
 	EDITOR_MODE_COMMAND /**< Command-line mode: ':' was typed in normal mode; the bottom row shows ':' and @c cmd and the cursor does not move in the text. */
 } editor_mode_t;
 
+/** Value of @c wantcol after "$" (Vim's MAXCOL): up and down go to the end of every line. */
+#define EDITOR_WANTCOL_EOL ((size_t)-1)
+
 /** Editor state: the text as a growable array of lines. */
 typedef struct {
 	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
@@ -27,7 +30,7 @@ typedef struct {
 	size_t coloff; /**< Display column of the first visible column of every line (horizontal scroll offset); 0 after init, free and load.
 	                    Kept by editor_scroll_cols(); render and draw show each line from this column on. */
 	size_t wantcol; /**< Wanted display column (Vim's curswant): where up and down try to put the cursor, so that it comes
-	                     back to its column after a shorter line. Set by a left or right move that moves; 0 after init, free
+	                     back to its column after a shorter line. Set by a left or right move that moves, by a motion key (@ref EDITOR_WANTCOL_EOL after "$"); 0 after init, free
 	                     and load. @c cx and @c wantcol change together in editor_move_cursor(): code that assigns @c cx
 	                     directly must set @c wantcol too. */
 	editor_mode_t mode; /**< Current mode; @ref EDITOR_MODE_NORMAL after init, free and load. In insert mode @c cx may equal the
@@ -198,6 +201,11 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * In insert mode editor_move_cursor() lets the cursor go one past the last character: right stops at the end of the
  * line, left comes back from it, and up and down put the cursor on the character whose columns contain @c wantcol, or
  * at the end of the line if @c wantcol is at or past the end of it (an empty line: 0).
+ *
+ * Motions (normal mode only; in insert mode the keys are typed): "0", "^" and "$" go to the start, the first non-blank
+ * and the last character of the line, "w", "b" and "e" by word and "W", "B" and "E" by WORD (see motions.h). The cursor goes to the
+ * target of the motion; @c wantcol is set from it even if the cursor does not move, and after "$" to @ref EDITOR_WANTCOL_EOL. They
+ * return non-zero only if the cursor moved, never set @c modified, and do nothing with no lines.
  *
  * Quitting: in normal mode "Z" sets @c zpend and returns 0; the next key then clears it and, if it is 'Z' or 'Q', runs
  * ":x" or ":q!" (see commands_run()); any other key is handled as if "Z" had not been typed. In insert and command mode

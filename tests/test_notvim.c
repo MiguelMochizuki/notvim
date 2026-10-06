@@ -447,6 +447,53 @@ static void test_notvim_arrow_keys_move_the_cursor_and_redraw(void) {
 	TEST_ASSERT_EQUAL_STRING(expected, left);
 }
 
+/** @brief 0 ^ $ w b e move the cursor on a pty and each redraws the screen with the new cursor and status position. */
+static void test_notvim_line_and_word_motions_move_the_cursor(void) {
+	const char *path = tmpdir_write("motions.txt", "foo bar.baz\n  qux\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], out[8][1024];
+	const char *keys = "wweb$0j^";
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	for (int i = 0; i < 8; i++) send_and_read(master, (char[]){ keys[i], '\0' }, out[i], sizeof(out[i]));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	const int cursors[8][2] = { { 1, 5 }, { 1, 8 }, { 1, 11 }, { 1, 9 }, { 1, 11 }, { 1, 1 }, { 2, 1 }, { 2, 3 } };
+	for (int i = 0; i < 8; i++) {
+		char expected[1024];
+		screen(expected, sizeof(expected), "foo bar.baz\r\n  qux", cursors[i][0], cursors[i][1]);
+		TEST_ASSERT_EQUAL_STRING(expected, out[i]);
+	}
+}
+
+/** @brief After "$", j keeps to the end of each line on a pty. */
+static void test_notvim_dollar_then_j_keeps_to_the_end(void) {
+	const char *path = tmpdir_write("eol.txt", "abcdef\nab\nabcdefgh\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], out[3][1024];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	send_and_read(master, "$", out[0], sizeof(out[0]));
+	send_and_read(master, "j", out[1], sizeof(out[1]));
+	send_and_read(master, "j", out[2], sizeof(out[2]));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	const int cursors[3][2] = { { 1, 6 }, { 2, 2 }, { 3, 8 } };
+	for (int i = 0; i < 3; i++) {
+		char expected[1024];
+		screen(expected, sizeof(expected), "abcdef\r\nab\r\nabcdefgh", cursors[i][0], cursors[i][1]);
+		TEST_ASSERT_EQUAL_STRING(expected, out[i]);
+	}
+}
+
 /** @brief j, l, k and h move the cursor down, right, up and left, like the arrow keys. */
 static void test_notvim_hjkl_move_the_cursor_and_redraw(void) {
 	const char *path = tmpdir_write("hjkl.txt", "abc\ndef\n");
@@ -2223,6 +2270,8 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_shows_a_full_screen_of_long_lines);
 	RUN_TEST(test_notvim_arrow_keys_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_hjkl_move_the_cursor_and_redraw);
+	RUN_TEST(test_notvim_line_and_word_motions_move_the_cursor);
+	RUN_TEST(test_notvim_dollar_then_j_keeps_to_the_end);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);
 	RUN_TEST(test_notvim_arrows_in_insert_mode_reach_the_end_of_the_line);
