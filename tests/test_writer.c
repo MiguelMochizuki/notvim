@@ -675,23 +675,23 @@ static void test_normal_zq_is_q_bang(void) {
 static void test_normal_z_pending_state(void) {
 	open_q(1);
 	TEST_ASSERT_EQUAL_INT(0, editor_handle_key(&e, 'Z'));
-	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	TEST_ASSERT_EQUAL_INT(1, e.pending.prefix == 'Z');
 	TEST_ASSERT_EQUAL_INT(1, editor_handle_key(&e, 'l')); /* moves, as Vim's "Zl" does */
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 	TEST_ASSERT_EQUAL_UINT(1, e.cx);
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
 	type("Zi"); /* the second key still acts: insert mode */
 	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_INSERT, e.mode);
 	type("\x1b");
 	type("Z\x1b"); /* Esc cancels */
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 	type("Zz"); /* an unknown key cancels too: a later "Z" is not completed by it */
 	type("Z");
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
-	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	TEST_ASSERT_EQUAL_INT(1, e.pending.prefix == 'Z');
 	type("q"); /* "Zq" is not a command: lower case */
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 	type("Z:"); /* the colon opens the command line */
 	TEST_ASSERT_EQUAL_INT(EDITOR_MODE_COMMAND, e.mode);
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
@@ -702,7 +702,7 @@ static void test_z_is_a_plain_character_in_insert_and_command_mode(void) {
 	editor_free(&e);
 	type("iZZQ");
 	TEST_ASSERT_EQUAL_STRING("ZZQ", editor_line(&e, 0));
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
 	type("\x1b:ZQ");
 	TEST_ASSERT_EQUAL_STRING("ZQ", e.cmd.text);
@@ -747,13 +747,13 @@ static void test_ctrl_q_refused_in_insert_mode_after_typing(void) {
 static void test_ctrl_q_clears_a_pending_z(void) {
 	open_q(1);
 	type("Z");
-	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	TEST_ASSERT_EQUAL_INT(1, e.pending.prefix == 'Z');
 	editor_handle_key(&e, 0x11);
 	TEST_ASSERT_EQUAL_INT(0, e.quit);
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 	type("Z");
 	TEST_ASSERT_EQUAL_INT(0, e.quit); /* a lone Z waits again, it does not run :x */
-	TEST_ASSERT_EQUAL_INT(1, e.zpend);
+	TEST_ASSERT_EQUAL_INT(1, e.pending.prefix == 'Z');
 }
 
 /** @brief A refused Ctrl+Q ends a half-typed UTF-8 character: its continuation byte afterwards does not complete it. */
@@ -774,7 +774,7 @@ static void test_quit_state_is_reset_by_free_and_load(void) {
 	editor_free(&e);
 	type("Z");
 	editor_free(&e);
-	TEST_ASSERT_EQUAL_INT(0, e.zpend);
+	TEST_ASSERT_EQUAL_INT(0, e.pending.prefix == 'Z');
 }
 
 void test_writer_suite(void) {

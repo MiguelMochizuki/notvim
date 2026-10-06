@@ -18,6 +18,18 @@ typedef enum {
 /** Value of @c wantcol after "$" (Vim's MAXCOL): up and down go to the end of every line. */
 #define EDITOR_WANTCOL_EOL ((size_t)-1)
 
+/** Largest count editor_handle_key() keeps: a longer one stays at this value, so typing digits cannot overflow. */
+#define EDITOR_COUNT_MAX 99999999u
+
+/**
+ * The pending state: what normal mode has read of a command that is not finished. ONE mechanism for every prefix:
+ * editor_handle_key() takes it at the start of each key and clears it, and only a key that continues the command stores it again.
+ */
+typedef struct {
+	char prefix;  /**< 0, or the prefix key that waits for the next key: 'Z' (for "ZZ" and "ZQ") or 'g' (for "gg"). */
+	size_t count; /**< The count typed so far, 0 for none, at most @ref EDITOR_COUNT_MAX. */
+} editor_pending_t;
+
 /** Editor state: the text as a growable array of lines. */
 typedef struct {
 	char **lines; /**< Owned array of owned NUL-terminated strings, without newlines. */
@@ -42,7 +54,8 @@ typedef struct {
 	char *msg;     /**< Owned message, or NULL: shown on the bottom row instead of the status line until the next key (see editor_set_message()). */
 	int quit;      /**< Non-zero once a quit was asked for (":q", ":wq", ":x", "ZZ", "ZQ", Ctrl+Q) and allowed; the caller then ends its input loop
 	                    and exits with status 0. 0 after init, free and load; a refused quit leaves it 0. */
-	int zpend;     /**< Non-zero between a "Z" typed in normal mode and the next key, which makes "ZZ" or "ZQ" or is handled as usual; 0 after init, free and load. */
+	editor_pending_t pending; /**< The unfinished normal-mode command (a count and a prefix key); all zero after init, free and load, and cleared by every key
+	                               that does not continue it and whenever the mode is not normal. */
 	char pend[4]; /**< Bytes of a UTF-8 character typed in insert mode that is still incomplete; see @ref pend_len. */
 	size_t pend_len; /**< Number of bytes in @ref pend; 0 when no character is half typed. Reset by any key that is not a
 	                      continuation byte, and by leaving insert mode. */
@@ -207,7 +220,16 @@ void editor_move_cursor(editor_t *e, editor_move_t dir);
  * target of the motion; @c wantcol is set from it even if the cursor does not move, and after "$" to @ref EDITOR_WANTCOL_EOL. They
  * return non-zero only if the cursor moved, never set @c modified, and do nothing with no lines.
  *
- * Quitting: in normal mode "Z" sets @c zpend and returns 0; the next key then clears it and, if it is 'Z' or 'Q', runs
+ * Counts and "g": in normal mode the digits 1 to 9 start a count and 0 continues it (with no count pending "0" is the motion).
+ * The count repeats the next motion: "h", "j", "k", "l" and the arrows, "w", "b", "e", "W", "B", "E" repeat their one-step
+ * motion and stop early at the ends of the text, as Vim does; "0", "^" and "$" ignore it, except that "{n}$" also goes
+ * n-1 lines down. "G" goes to line {count} (the last line with no count) and "gg" to line {count} (the first with no count),
+ * a count past the end meaning the last line; the cursor goes to the first non-blank character of that line and @c wantcol is set from it.
+ * "g" waits for a second key: anything but "g" (Esc too) is dropped with it, and with the count. The typed count is not
+ * shown. Every key that does not continue the command, and Esc, clear the count; counts and "g" do nothing in insert and
+ * command mode, where they are typed. Typing a digit or "g" returns 0 (nothing to redraw).
+ *
+ * Quitting: in normal mode "Z" sets @c pending.prefix and returns 0; the next key then clears it and, if it is 'Z' or 'Q', runs
  * ":x" or ":q!" (see commands_run()); any other key is handled as if "Z" had not been typed. In insert and command mode
  * 'Z' is a plain character. Ctrl+Q (byte 0x11, in every mode) asks to quit like ":q": it sets @c quit, or, when
  * @c modified is set, shows "E37: No write since last change (add ! to override)" and the editor goes on.

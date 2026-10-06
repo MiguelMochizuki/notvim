@@ -20,7 +20,7 @@ void editor_init(editor_t *e) {
 	e->crlf = 0;
 	e->modified = 0;
 	e->quit = 0;
-	e->zpend = 0;
+	e->pending = (editor_pending_t){ 0, 0 };
 	e->pend_len = 0;
 	e->mode = EDITOR_MODE_NORMAL;
 	e->wantcol = 0;
@@ -572,18 +572,64 @@ static int goto_target(editor_t *e, motion_pos_t t, int to_eol) {
 	return moved;
 }
 
+/**
+ * @brief Move the cursor @p n times in direction @p dir, stopping at the first step that does not move (the end of the text or of the line).
+ * @return Non-zero if the cursor moved at all.
+ */
+static int repeat_move(editor_t *e, editor_move_t dir, size_t n) {
+	size_t y = e->cy, x = e->cx;
+	for (; n; n--) {
+		size_t py = e->cy, px = e->cx;
+		editor_move_cursor(e, dir);
+		if (e->cy == py && e->cx == px) break;
+	}
+	return e->cy != y || e->cx != x;
+}
+
+/** @brief One step of the word motion typed as @p key ("w", "W", "b", "B", "e" or "E") from the cursor. */
+static motion_pos_t word_step(const editor_t *e, int key) {
+	int big = key == 'W' || key == 'B' || key == 'E';
+	return key == 'w' || key == 'W' ? motion_word_next(e, big) : key == 'b' || key == 'B' ? motion_word_prev(e, big) : motion_word_end(e, big);
+}
+
+/** @brief The target of the word motion @p key repeated @p n times, stopping early where a step no longer moves; the cursor is left where it was. */
+static motion_pos_t repeat_word(editor_t *e, int key, size_t n) {
+	size_t y = e->cy, x = e->cx;
+	motion_pos_t t = { y, x };
+	for (; n; n--) {
+		t = word_step(e, key);
+		if (t.y == e->cy && t.x == e->cx) break;
+		e->cy = t.y;
+		e->cx = t.x;
+	}
+	e->cy = y;
+	e->cx = x;
+	return t;
+}
+
+/** @brief "{n}$": n-1 lines down, then the end of that line; Vim fails on the last line (the cursor stays) but still wants the end for "j" and "k". */
+static int goto_line_end(editor_t *e, size_t n) {
+	if (n > 1 && !repeat_move(e, EDITOR_MOVE_DOWN, n - 1)) {
+		e->wantcol = EDITOR_WANTCOL_EOL;
+		return 0;
+	}
+	return goto_target(e, motion_line_end(e), 1);
+}
+
 /** @brief editor_handle_key() without the message: the message was cleared by the caller. */
 static int handle_key(editor_t *e, int key) {
 	editor_move_t dir;
-	int zpend = e->zpend; /* any key, Ctrl+Q included, ends a pending Z */
-	e->zpend = 0;
+	editor_pending_t pend = e->pending; /* any key, Ctrl+Q included, ends what is pending */
+	e->pending = (editor_pending_t){ 0, 0 };
+	if (e->mode != EDITOR_MODE_NORMAL) pend = (editor_pending_t){ 0, 0 }; /* counts and prefixes are for normal mode only */
+	size_t n = pend.count ? pend.count : 1;
 	if (key == 0x11) {
 		e->pend_len = 0;
 		if (e->mode == EDITOR_MODE_COMMAND) cmd_leave(e); /* a refusal shows in the message, which the command line would hide */
 		commands_run(e, "q");
 		return 1;
 	}
-	if (zpend) {
+	if (pend.prefix == 'Z') {
 		if (key == 'Z' || key == 'Q') {
 			commands_run(e, key == 'Z' ? "x" : "q!");
 			return 1;
@@ -599,6 +645,12 @@ static int handle_key(editor_t *e, int key) {
 	}
 	if (e->mode != EDITOR_MODE_NORMAL && key < 256) return type_byte(e, (unsigned char)key);
 	e->pend_len = 0;
+	if (pend.prefix == 'g') return key == 'g' ? goto_target(e, motion_goto_line(e, n), 0) : 0; /* "g" and any other key: dropped */
+	if ((key >= '1' && key <= '9') || (key == '0' && pend.count)) {
+		size_t count = pend.count * 10 + (size_t)(key - '0');
+		e->pending.count = count > EDITOR_COUNT_MAX ? EDITOR_COUNT_MAX : count;
+		return 0;
+	}
 	switch (key) {
 	case KEY_UP: dir = EDITOR_MOVE_UP; break;
 	case KEY_DOWN: dir = EDITOR_MOVE_DOWN; break;
@@ -609,15 +661,17 @@ static int handle_key(editor_t *e, int key) {
 		break;
 	case '0': return goto_target(e, motion_line_start(e), 0);
 	case '^': return goto_target(e, motion_first_nonblank(e), 0);
-	case '$': return goto_target(e, motion_line_end(e), 1);
-	case 'w': case 'W': return goto_target(e, motion_word_next(e, key == 'W'), 0);
-	case 'b': case 'B': return goto_target(e, motion_word_prev(e, key == 'B'), 0);
-	case 'e': case 'E': return goto_target(e, motion_word_end(e, key == 'E'), 0);
+	case '$': return goto_line_end(e, n);
+	case 'w': case 'W': case 'b': case 'B': case 'e': case 'E': return goto_target(e, repeat_word(e, key, n), 0);
+	case 'G': return goto_target(e, motion_goto_line(e, pend.count), 0);
+	case 'g':
+		e->pending = (editor_pending_t){ 'g', pend.count };
+		return 0;
 	case 'i':
 		e->mode = EDITOR_MODE_INSERT;
 		return 1;
 	case 'Z':
-		e->zpend = 1;
+		e->pending.prefix = 'Z';
 		return 0;
 	case ':':
 		e->mode = EDITOR_MODE_COMMAND;
@@ -631,8 +685,8 @@ static int handle_key(editor_t *e, int key) {
 		return 1;
 	default: return 0;
 	}
-	editor_move_cursor(e, dir);
-	return 1;
+	repeat_move(e, dir, n);
+	return 1; /* as before counts: a move key always asks for a redraw, even at an end of the text */
 }
 
 int editor_handle_key(editor_t *e, int key) {

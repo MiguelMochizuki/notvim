@@ -470,6 +470,31 @@ static void test_notvim_line_and_word_motions_move_the_cursor(void) {
 	}
 }
 
+/** @brief Counts, "G" and "gg" on a pty: "3j", "G", "2G", "gg" and "4l" each redraw once, with the new cursor and status position; the digit and the first "g" draw nothing. */
+static void test_notvim_counts_gg_and_g_move_the_cursor(void) {
+	const char *path = tmpdir_write("counts.txt", "abcdef\n  b2\nc3\nd4\ne5\nf6\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	char first[1024], out[5][1024], quiet[64];
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	const char *keys[5] = { "3j", "G", "2G", "gg", "4l" };
+	for (int i = 0; i < 5; i++) send_and_read(master, keys[i], out[i], sizeof(out[i]));
+	size_t digit = send_and_read(master, "3", quiet, sizeof(quiet)); /* nothing to draw */
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	TEST_ASSERT_EQUAL_UINT(0, digit);
+	const int cursors[5][2] = { { 4, 1 }, { 6, 1 }, { 2, 3 }, { 1, 1 }, { 1, 5 } };
+	for (int i = 0; i < 5; i++) {
+		char expected[1024];
+		screen(expected, sizeof(expected), "abcdef\r\n  b2\r\nc3\r\nd4\r\ne5\r\nf6", cursors[i][0], cursors[i][1]);
+		TEST_ASSERT_EQUAL_STRING(expected, out[i]);
+	}
+}
+
 /** @brief After "$", j keeps to the end of each line on a pty. */
 static void test_notvim_dollar_then_j_keeps_to_the_end(void) {
 	const char *path = tmpdir_write("eol.txt", "abcdef\nab\nabcdefgh\n");
@@ -2271,6 +2296,7 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_arrow_keys_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_hjkl_move_the_cursor_and_redraw);
 	RUN_TEST(test_notvim_line_and_word_motions_move_the_cursor);
+	RUN_TEST(test_notvim_counts_gg_and_g_move_the_cursor);
 	RUN_TEST(test_notvim_dollar_then_j_keeps_to_the_end);
 	RUN_TEST(test_notvim_uppercase_hjkl_do_nothing);
 	RUN_TEST(test_notvim_i_and_esc_switch_modes);

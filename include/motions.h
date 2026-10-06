@@ -58,4 +58,9 @@ motion_pos_t motion_word_prev(const editor_t *e, int big);
  */
 motion_pos_t motion_word_end(const editor_t *e, int big);
 
+/**
+ * @brief "G" and "gg": the first non-blank character of line @p n (1-based), as with "^" (the last character of a line of only blanks); an @p n of 0 or past the last line means the last line.
+ */
+motion_pos_t motion_goto_line(const editor_t *e, size_t n);
+
 #endif

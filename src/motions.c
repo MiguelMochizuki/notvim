@@ -115,6 +115,14 @@ motion_pos_t motion_first_nonblank(const editor_t *e) {
 	return on_char(e, pos);
 }
 
+motion_pos_t motion_goto_line(const editor_t *e, size_t n) {
+	motion_pos_t pos = cursor(e);
+	if (!e->count) return pos;
+	pos.y = n == 0 || n > e->count ? e->count - 1 : n - 1;
+	pos.x = strspn(e->lines[pos.y], " \t");
+	return on_char(e, pos);
+}
+
 motion_pos_t motion_line_end(const editor_t *e) {
 	motion_pos_t pos = cursor(e);
 	if (!e->count) return pos;
