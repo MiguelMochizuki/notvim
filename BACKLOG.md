@@ -19,7 +19,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## To do
 
-Order of work: H7.1, H0.11, H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H9.7, H9.8, and the search epic H10.
+Order of work: H7.1, H0.11, H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H7.4 and H7.5 (mouse reporting; place to be confirmed), H9.7, H9.8, and the search epic H10.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
@@ -35,6 +35,14 @@ H7.1 needs nothing else and goes first. H7.2 and H7.3 come once yank exists (aft
   - Fallback: an external tool (`wl-copy`, `xclip`, `xsel`) only if one is already installed, found at run time. Never installed by us. The editor's own register keeps working.
 - **H7.3** As user, I want to paste from the system clipboard as text, never as commands
   - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
+- **H7.4** As user, I want the wheel to scroll more continuously, depending on how fast I turn it
+  - Wished for while H7.1 was being built: with alternate scroll mode the terminal sends a fixed number of arrow keys per notch, so a fast spin is not faster than a slow one.
+  - Needs mouse reporting (`?1000` and `?1006`, SGR coordinates), which gives notvim the wheel events with their timing. The editor then picks the number of lines from the speed of the last events.
+  - This reverses the H7.1 decision "do not enable mouse reporting": the terminal stops doing native selection, so H7.5 has to replace it. Do H7.4 and H7.5 together or not at all.
+- **H7.5** As user, I want to press the left button, drag up and down through the whole document and copy what I selected to the GUI clipboard, like selecting in the terminal
+  - The editor draws its own selection (a range of the text, not of the screen), scrolls while the pointer is at the top or bottom edge, and keeps it when the document is longer than the window.
+  - Releasing the button copies to the system clipboard with the H7.2 path (`OSC 52`, or an installed tool).
+  - Open questions: Shift+drag to get the terminal's own selection back, a double and triple click for word and line, and how the selection interacts with visual mode (H9.8).
 
 ### H0 Development foundations
 
