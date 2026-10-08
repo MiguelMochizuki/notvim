@@ -1399,14 +1399,14 @@ static void test_editor_render_does_not_swallow_a_control_byte_after_a_lead_byte
 /** @brief Clipping to N columns keeps N whole characters of 1, 2, 3 and 4 bytes and never cuts one. */
 static void test_editor_render_clips_utf8_by_characters(void) {
 	editor_init(&e);
-	append("a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z"); /* a, e-acute, euro, emoji, z: 5 columns, 11 bytes */
+	append("a\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez"); /* a, e-acute, euro, G clef, z: 5 columns, 11 bytes */
 	assert_render_cols(0, "");
 	assert_render_cols(1, "a");
 	assert_render_cols(2, "a\xc3\xa9");
 	assert_render_cols(3, "a\xc3\xa9\xe2\x82\xac");
-	assert_render_cols(4, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80");
-	assert_render_cols(5, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
-	assert_render_cols(80, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+	assert_render_cols(4, "a\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9e");
+	assert_render_cols(5, "a\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez");
+	assert_render_cols(80, "a\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez");
 }
 
 /** @brief A line of 201 bytes, 'a' and 100 e-acutes, clipped to 80 columns is 80 characters of valid UTF-8. */
@@ -1487,10 +1487,10 @@ static void test_editor_render_tab_after_question_mark_cells(void) {
 	assert_render_cols(8, "??      ");
 }
 
-/** @brief The drawn cursor column counts characters, not bytes: after e-acute, euro sign and emoji. */
+/** @brief The drawn cursor column counts characters, not bytes: after e-acute, euro sign and G clef. */
 static void test_editor_draw_cursor_column_counts_characters(void) {
 	editor_init(&e);
-	append("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z");
+	append("\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez");
 	const size_t starts[] = { 0, 2, 5, 9 }; /* byte index of each character */
 	for (size_t i = 0; i < 4; i++) {
 		e.cx = starts[i];
@@ -1698,7 +1698,7 @@ static void test_editor_cursor_vertical_move_never_lands_inside_a_character(void
 /** @brief The cursor on the last 4-byte character, exactly at the width, is drawn on that last column. */
 static void test_editor_draw_cursor_on_the_last_four_byte_character_at_the_width(void) {
 	editor_init(&e);
-	append("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80");
+	append("\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e");
 	e.cx = 8;
 	assert_draw_cursor_col(3, 3);
 	assert_draw_cursor_col(4, 3);
@@ -1979,14 +1979,14 @@ static void test_editor_wanted_column_from_a_mark_is_its_first_column(void) {
 static void test_editor_wanted_column_with_multibyte_characters(void) {
 	editor_init(&e);
 	append("abcdef");
-	append("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z"); /* columns 0 1 2 3 at bytes 0 2 5 9 */
+	append("\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez"); /* columns 0 1 2 3 at bytes 0 2 5 9 */
 	right_then_down(2);
 	assert_cursor(1, 5);
 	editor_move_cursor(&e, EDITOR_MOVE_RIGHT);
 	assert_cursor(1, 9);
 	editor_move_cursor(&e, EDITOR_MOVE_UP);
 	assert_cursor(0, 3);
-	two_lines("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80z", "abcdef");
+	two_lines("\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ez", "abcdef");
 	move_n(EDITOR_MOVE_RIGHT, 2); /* byte 5, column 2 */
 	editor_move_cursor(&e, EDITOR_MOVE_DOWN);
 	assert_cursor(1, 2); /* the c: not byte 5 */
@@ -2411,8 +2411,8 @@ static void test_editor_status_truncates_at_every_width(void) {
 	name_it("a\x01" "b");
 	drawn_t mark = { { "a", "^A", "b", " ", "N", "O", "R", "M", "A", "L", NULL } };
 	assert_status_at_every_width(&mark);
-	name_it("\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80x");
-	drawn_t utf8 = { { "\xc3\xa9", "\xe2\x82\xac", "\xf0\x9f\x98\x80", "x", " ", "N", "O", "R", "M", "A", "L", NULL } };
+	name_it("\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9ex");
+	drawn_t utf8 = { { "\xc3\xa9", "\xe2\x82\xac", "\xf0\x9d\x84\x9e", "x", " ", "N", "O", "R", "M", "A", "L", NULL } };
 	assert_status_at_every_width(&utf8);
 	name_it("a\tb"); /* cut inside the 7 spaces of the tab */
 	drawn_t tab = { { "a", " ", " ", " ", " ", " ", " ", " ", "b", " ", "N", "O", "R", "M", "A", "L", NULL } };
@@ -2700,8 +2700,8 @@ static void test_editor_typing_a_multibyte_character(void) {
 	assert_line(&e, 0, "a\xc3\xa9" "b");
 	assert_cursor(0, 3);
 	TEST_ASSERT_EQUAL_UINT(2, e.wantcol);
-	type("\xe2\x82\xac\xf0\x9f\x98\x80"); /* 3 and 4 bytes */
-	assert_line(&e, 0, "a\xc3\xa9\xe2\x82\xac\xf0\x9f\x98\x80" "b");
+	type("\xe2\x82\xac\xf0\x9d\x84\x9e"); /* 3 and 4 bytes */
+	assert_line(&e, 0, "a\xc3\xa9\xe2\x82\xac\xf0\x9d\x84\x9e" "b");
 	assert_cursor(0, 10);
 	TEST_ASSERT_EQUAL_UINT(4, e.wantcol);
 }
@@ -3622,10 +3622,10 @@ static void test_editor_status_overhead_covers_the_status_escapes(void) {
 static void test_editor_draw_screen_worst_case_fits_the_documented_size(void) {
 	enum { ROWS = 3, COLS = 12 };
 	editor_init(&e);
-	name_it("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80"
-	        "\xf0\x9f\x98\x80\xf0\x9f\x98\x80.txt");
+	name_it("\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e"
+	        "\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e.txt");
 	char line[COLS * 4 + 1] = "", text[2 * (COLS * 4 + 2) + 1] = "", status[COLS * 4 + 1];
-	for (int i = 0; i < COLS; i++) strcat(line, "\xf0\x9f\x98\x80");
+	for (int i = 0; i < COLS; i++) strcat(line, "\xf0\x9d\x84\x9e");
 	append(line);
 	append(line);
 	snprintf(text, sizeof(text), "%s\r\n%s", line, line);
@@ -4122,14 +4122,14 @@ static void test_editor_hscroll_status_shows_the_absolute_position(void) {
 /** @brief A screen drawn from the middle of a line of 4-byte characters fits the documented buffer size, whole. */
 static void test_editor_hscroll_draw_screen_fits_the_documented_buffer(void) {
 	editor_init(&e);
-	append("\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80");
+	append("\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e");
 	e.coloff = 2;
 	size_t rows = 2, cols = 5;
 	size_t size = rows * (cols * 4 + 5) + EDITOR_DRAW_OVERHEAD + EDITOR_STATUS_OVERHEAD;
 	char *out = malloc(size);
 	TEST_ASSERT_NOT_NULL(out);
 	size_t n = editor_draw_screen(&e, rows, cols, out, size);
-	int ok = strstr(out, "\x1b[H" "\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80\xf0\x9f\x98\x80" "\x1b[2;1H") != NULL;
+	int ok = strstr(out, "\x1b[H" "\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e\xf0\x9d\x84\x9e" "\x1b[2;1H") != NULL;
 	free(out);
 	TEST_ASSERT_TRUE(ok);
 	TEST_ASSERT_TRUE(n > 0);
@@ -4148,6 +4148,82 @@ static void test_editor_hscroll_is_reset_by_init_free_and_load(void) {
 	e.coloff = 5;
 	TEST_ASSERT_EQUAL_INT(0, editor_load_file(&e, path));
 	TEST_ASSERT_EQUAL_UINT(0, e.coloff);
+}
+
+/** @brief A wide character takes two columns: clipping keeps it whole or leaves it out, never half. */
+static void test_editor_render_clips_wide_characters_by_columns(void) {
+	editor_init(&e);
+	append("a\xe6\x97\xa5" "b"); /* a, a wide character (3 bytes), b: 4 columns */
+	assert_render_cols(0, "");
+	assert_render_cols(1, "a");
+	assert_render_cols(2, "a"); /* the wide character does not fit in the second column: left out */
+	assert_render_cols(3, "a\xe6\x97\xa5");
+	assert_render_cols(4, "a\xe6\x97\xa5" "b");
+}
+
+/** @brief At the left edge a wide character that is cut shows a blank in its remaining column, so the cells after it stay in place. */
+static void test_editor_render_blanks_the_cut_half_of_a_wide_character(void) {
+	editor_init(&e);
+	append("\xe6\x97\xa5" "a\xe6\x97\xa5");
+	e.coloff = 1;
+	assert_render_cols(ALL_COLS, " a\xe6\x97\xa5");
+	e.coloff = 2;
+	assert_render_cols(ALL_COLS, "a\xe6\x97\xa5");
+}
+
+/** @brief A base character and its combining marks are drawn together and take the columns of the base. */
+static void test_editor_render_keeps_a_base_and_its_marks_together(void) {
+	editor_init(&e);
+	append("e\xcc\x81" "x");  /* e + U+0301, then x: 2 columns */
+	assert_render_cols(ALL_COLS, "e\xcc\x81" "x");
+	assert_render_cols(1, "e\xcc\x81");
+	assert_render_cols(2, "e\xcc\x81" "x");
+}
+
+/** @brief The drawn cursor sits on the first column of a wide character and after the columns of the cells before it. */
+static void test_editor_draw_cursor_column_counts_wide_characters_and_marks(void) {
+	editor_init(&e);
+	append("\xe6\x97\xa5" "a\xe6\x97\xa5" "e\xcc\x81" "b"); /* columns: wide 1-2, a 3, wide 4-5, e 6, b 7 */
+	const size_t starts[] = { 0, 3, 4, 7, 10 }; /* byte index of each cell */
+	const size_t cols[] = { 1, 3, 4, 6, 7 };
+	for (size_t i = 0; i < 5; i++) {
+		e.cx = starts[i];
+		assert_draw_cursor_col(ALL_COLS, cols[i]);
+	}
+}
+
+/** @brief Scrolling sideways keeps the whole wide character under the cursor in the window. */
+static void test_editor_scroll_cols_keeps_a_wide_cursor_cell_whole(void) {
+	editor_init(&e);
+	append("aaa\xe6\x97\xa5");
+	e.cx = 3; /* on the wide character: columns 3 and 4 (0-based) */
+	editor_scroll_cols(&e, 3);
+	TEST_ASSERT_EQUAL_UINT(2, e.coloff); /* the window shows columns 2 to 4 */
+}
+
+/** @brief Moving through wide characters and marks goes cell by cell, and j and k keep the wanted column, landing on the wide cell that holds it. */
+static void test_editor_moves_over_wide_characters_and_marks(void) {
+	editor_init(&e);
+	append("\xe6\x97\xa5\xe6\x97\xa5\xe6\x97\xa5"); /* three wide characters: columns 0-1, 2-3, 4-5 (0-based) */
+	append("abcdef");
+	press("ll");
+	TEST_ASSERT_EQUAL_UINT(6, e.cx); /* on the third wide character, at column 4 */
+	press("j");
+	TEST_ASSERT_EQUAL_UINT(1, e.cy);
+	TEST_ASSERT_EQUAL_UINT(4, e.cx); /* the e, at column 4 */
+	press("lk");
+	TEST_ASSERT_EQUAL_UINT(0, e.cy);
+	TEST_ASSERT_EQUAL_UINT(6, e.cx); /* wanted column 5 is the second half of the third wide character: it lands on it */
+}
+
+/** @brief l and h step over a base with its marks as one character. */
+static void test_editor_moves_over_a_base_and_its_marks_as_one_character(void) {
+	editor_init(&e);
+	append("e\xcc\x81\xcc\x82" "x"); /* e + two marks (5 bytes), then x */
+	press("l");
+	TEST_ASSERT_EQUAL_UINT(5, e.cx);
+	press("h");
+	TEST_ASSERT_EQUAL_UINT(0, e.cx);
 }
 
 void test_editor_suite(void) {
@@ -4470,4 +4546,11 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_hscroll_status_shows_the_absolute_position);
 	RUN_TEST(test_editor_hscroll_draw_screen_fits_the_documented_buffer);
 	RUN_TEST(test_editor_hscroll_is_reset_by_init_free_and_load);
+	RUN_TEST(test_editor_render_clips_wide_characters_by_columns);
+	RUN_TEST(test_editor_render_blanks_the_cut_half_of_a_wide_character);
+	RUN_TEST(test_editor_render_keeps_a_base_and_its_marks_together);
+	RUN_TEST(test_editor_draw_cursor_column_counts_wide_characters_and_marks);
+	RUN_TEST(test_editor_scroll_cols_keeps_a_wide_cursor_cell_whole);
+	RUN_TEST(test_editor_moves_over_wide_characters_and_marks);
+	RUN_TEST(test_editor_moves_over_a_base_and_its_marks_as_one_character);
 }

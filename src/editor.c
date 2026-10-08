@@ -101,12 +101,13 @@ static int is_control(unsigned char c) {
 
 /**
  * @brief Width in columns of the cell at @p p drawn at column @p col: a tab goes to the next tab stop,
- *        a mark such as ^A is two, anything else (a character, '?' for an invalid byte or C1) is one.
+ *        a mark such as ^A is two, a wide character is two (utf8_cell_cols()), anything else (a character
+ *        with its combining marks, '?' for an invalid byte or C1) is one.
  */
 static size_t cell_width(const char *p, size_t col) {
 	unsigned char c = (unsigned char)*p;
 	if (c == '\t') return TAB_STOP - col % TAB_STOP;
-	return is_control(c) ? 2 : 1;
+	return is_control(c) ? 2 : utf8_cell_cols(p);
 }
 
 /** @brief Display column of byte index @p cx in @p line: the width of the cells before it. */

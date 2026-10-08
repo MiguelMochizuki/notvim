@@ -300,10 +300,12 @@ int editor_handle_key(editor_t *e, int key);
  * Lines are joined with "\r\n" (no trailing separator), because raw mode
  * turns off output processing. A blank line counts as a row. A tab is drawn
  * as spaces up to the next multiple of 8 columns (cut at the right edge). Text is UTF-8
- * (RFC 3629): each valid character is one column and is copied as its bytes;
+ * (RFC 3629): each valid character is copied as its bytes, with the combining marks that follow it, and
+ * takes one column, or two if it is wide (East Asian wide, fullwidth, emoji; see utf8_cell_cols());
  * each byte that is not part of a valid sequence, and each C1 control
  * (U+0080 to U+009F, which some terminals act on), is drawn as one '?'.
- * Wide and combining characters are not special: they also take one column. A control byte
+ * A wide character that does not fit in the last column is left out, and one cut by the left edge
+ * leaves blanks in its remaining column. A control byte
  * (below 0x20 except tab, or 0x7f) is drawn as a two-column mark such as ^[
  * or ^?, so that a file can never send commands to the terminal; clipping
  * is by columns and never cuts a character or shows half of a mark. Output is
@@ -379,7 +381,7 @@ const char *editor_mode_label(const editor_t *e);
  * and the [dos] when @c modified is set: "<name> [dos] [+] <mode>"), then spaces, then "<line>,<col>" ending in the last column, where @c name is @c e->path ("[No Name]" if it is NULL
  * or empty) and @c mode is editor_mode_label(). @c line is @c cy + 1 (1 for an editor with no lines) and
  * @c col is the display column of the cursor plus 1 (1 if @c cy is not a line), counted as the cursor is drawn (a tab or a mark counts from its
- * first column, a character or '?' is one column), not clipped to the width. The name goes through the same rules as
+ * first column, a wide character is two columns, any other character or '?' is one), not clipped to the width. The name goes through the same rules as
  * the text of a line: a control byte is a two-column mark such as ^A, a tab is spaces to the next multiple of 8 columns
  * from the start of the status, valid UTF-8 is copied and any other byte or a C1 control is '?'.
  *

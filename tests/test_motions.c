@@ -11,6 +11,7 @@
 #include "editor.h"
 #include "motions.h"
 #include "keys.h"
+#include "utf8.h"
 
 /** Editor shared by the tests of this file. */
 static editor_t e;
@@ -127,10 +128,9 @@ static int press(int key) {
 /** @brief The display column (tab stops of 8, a control byte 2 columns, a UTF-8 character 1) of byte @p x of @p line. */
 static size_t display_of(const char *line, size_t x) {
 	size_t col = 0;
-	for (size_t i = 0; i < x; i++) {
+	for (size_t i = 0; i < x; i += utf8_cell_len(line + i)) {
 		unsigned char c = (unsigned char)line[i];
-		if ((c & 0xc0) == 0x80) continue;
-		col += c == '\t' ? 8 - col % 8 : (c < 0x20 || c == 0x7f) ? 2 : 1;
+		col += c == '\t' ? 8 - col % 8 : (c < 0x20 || c == 0x7f) ? 2 : utf8_cell_cols(line + i);
 	}
 	return col;
 }

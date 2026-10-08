@@ -1297,7 +1297,7 @@ static void test_notvim_full_screen_of_three_byte_text_is_not_truncated(void) {
 
 /** @brief A full screen of 4-byte characters (7.7 KB) is drawn completely: a buffer of 3 bytes per column is too small. */
 static void test_notvim_full_screen_of_four_byte_text_is_not_truncated(void) {
-	assert_full_multibyte_screen("\xf0\x9f\x98\x80", 24);
+	assert_full_multibyte_screen("\xf0\x9d\x84\x9e", 24);
 }
 
 /** @brief Growing from 2 rows to 24 draws the full screen of 2-byte characters on the resize path. */
@@ -1312,7 +1312,7 @@ static void test_notvim_resize_draws_a_full_screen_of_three_byte_text(void) {
 
 /** @brief Growing from 2 rows to 24 draws the full screen of 4-byte characters on the resize path. */
 static void test_notvim_resize_draws_a_full_screen_of_four_byte_text(void) {
-	assert_full_multibyte_screen("\xf0\x9f\x98\x80", 2);
+	assert_full_multibyte_screen("\xf0\x9d\x84\x9e", 2);
 }
 
 /** @brief h, j, k and the arrow keys move by character, and a vertical move into a character snaps to its start. */
@@ -1890,33 +1890,34 @@ static void test_notvim_status_line_shows_dos_for_a_crlf_file_only(void) {
 }
 
 /** Four-byte character used by the buffer-size tests. */
-#define EMOJI "\xf0\x9f\x98\x80"
+/** A four-byte character that takes one column (U+1D11E): four bytes per column is the worst case for the buffers. An emoji takes two columns. */
+#define FOUR_BYTE "\xf0\x9d\x84\x9e"
 
 /** @brief Write the file of the buffer-size tests: a name of 60 four-byte characters (240 bytes) and 2 lines of 60 four-byte characters; return its path in @p path. */
-static void write_emoji_file(char *path, size_t size) {
+static void write_four_byte_file(char *path, size_t size) {
 	const char *dir = tmpdir_path(""); /* "/tmp/notvim_XXXXXX/" */
 	TEST_ASSERT_NOT_NULL(dir);
 	size_t n = (size_t)snprintf(path, size, "%s", dir);
-	for (int i = 0; i < 60; i++) n += (size_t)snprintf(path + n, size - n, EMOJI);
+	for (int i = 0; i < 60; i++) n += (size_t)snprintf(path + n, size - n, FOUR_BYTE);
 	FILE *f = fopen(path, "w");
 	TEST_ASSERT_NOT_NULL(f);
 	for (int line = 0; line < 2; line++) {
-		for (int i = 0; i < 60; i++) fputs(EMOJI, f);
+		for (int i = 0; i < 60; i++) fputs(FOUR_BYTE, f);
 		fputc('\n', f);
 	}
 	TEST_ASSERT_EQUAL_INT(0, fclose(f));
 }
 
-/** @brief The whole 3x60 screen of the emoji file: 2 full-width 4-byte rows and a status line of the 4-byte name cut to 56 columns (the directory prefix, then emoji), a space and "1,1". */
-static void emoji_screen(char *buf, size_t size, const char *path) {
+/** @brief The whole 3x60 screen of the four-byte file: 2 full-width 4-byte rows and a status line of the 4-byte name cut to 56 columns (the directory prefix, then the four-byte character), a space and "1,1". */
+static void four_byte_screen(char *buf, size_t size, const char *path) {
 	char text[1024] = "", status[1024];
 	for (int line = 0; line < 2; line++) {
 		if (line) strcat(text, "\r\n");
-		for (int i = 0; i < 60; i++) strcat(text, EMOJI);
+		for (int i = 0; i < 60; i++) strcat(text, FOUR_BYTE);
 	}
 	size_t dir_len = strlen(path) - 240;
 	snprintf(status, sizeof(status), "%.*s", (int)dir_len, path);
-	for (size_t i = dir_len; i < 56; i++) strcat(status, EMOJI);
+	for (size_t i = dir_len; i < 56; i++) strcat(status, FOUR_BYTE);
 	strcat(status, " 1,1");
 	draw_expected_status(buf, size, text, 2, 60, status, 3, 1, 1);
 }
@@ -1924,10 +1925,10 @@ static void emoji_screen(char *buf, size_t size, const char *path) {
 /** @brief The draw buffer holds a 3x60 screen made only of 4-byte characters, status line included: a buffer sized from the text rows is too small by about 100 bytes. */
 static void test_notvim_draw_buffer_holds_the_status_line_of_four_byte_text(void) {
 	char path[512], first[4096], expected[4096];
-	write_emoji_file(path, sizeof(path));
+	write_four_byte_file(path, sizeof(path));
 	int master;
 	pid_t pid = spawn_notvim_size(path, 3, 60, &master);
-	emoji_screen(expected + sizeof(ALT_ENTER) - 1, sizeof(expected) - (sizeof(ALT_ENTER) - 1), path);
+	four_byte_screen(expected + sizeof(ALT_ENTER) - 1, sizeof(expected) - (sizeof(ALT_ENTER) - 1), path);
 	memcpy(expected, ALT_ENTER, sizeof(ALT_ENTER) - 1);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
@@ -1941,13 +1942,13 @@ static void test_notvim_draw_buffer_holds_the_status_line_of_four_byte_text(void
 /** @brief The same screen reached by a resize from 24x80, where the buffer is reallocated for the new size. */
 static void test_notvim_resize_draw_buffer_holds_the_status_line_of_four_byte_text(void) {
 	char path[512], first[4096], after[4096], expected[4096];
-	write_emoji_file(path, sizeof(path));
+	write_four_byte_file(path, sizeof(path));
 	int master;
 	pid_t pid = spawn_notvim(path, 24, &master);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	set_size(master, 3, 60);
-	emoji_screen(expected, sizeof(expected), path);
+	four_byte_screen(expected, sizeof(expected), path);
 	read_output(master, after, sizeof(after));
 	int status = quit_and_wait(master, pid);
 	close(master);
@@ -2048,28 +2049,28 @@ static void assert_uniform_screen(const char *unit, int per_line, int file_lines
 
 /** @brief A tall narrow terminal (100 rows by 20 columns) of 4-byte characters, rows one column short of full: nothing is dropped. */
 static void test_notvim_tall_narrow_screen_of_four_byte_text_is_complete(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 19, 100, 100, 20, 0, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 19, 100, 100, 20, 0, 0, 0);
 }
 
 /** @brief The same screen with full-width rows (no erase at the end of a row). */
 static void test_notvim_tall_narrow_screen_of_full_width_four_byte_rows_is_complete(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 20, 100, 100, 20, 0, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 20, 100, 100, 20, 0, 0, 0);
 }
 
 /** @brief The tall narrow terminal reached by a resize (from 2 rows by 80 columns): the buffer is reallocated for it. */
 static void test_notvim_resize_to_a_tall_narrow_screen_of_four_byte_text_is_complete(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 20, 100, 100, 20, 1, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 20, 100, 100, 20, 1, 0, 0);
 }
 
 /** @brief A short wide terminal (2 rows by 200 columns) of 4-byte characters, full width and one short. */
 static void test_notvim_short_wide_screen_of_four_byte_text_is_complete(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 200, 5, 2, 200, 0, 0, 0);
-	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 5, 2, 200, 0, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 200, 5, 2, 200, 0, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 199, 5, 2, 200, 0, 0, 0);
 }
 
 /** @brief The short wide terminal reached by a resize. */
 static void test_notvim_resize_to_a_short_wide_screen_of_four_byte_text_is_complete(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 5, 2, 200, 1, 0, 0);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 199, 5, 2, 200, 1, 0, 0);
 }
 
 /**
@@ -2077,7 +2078,7 @@ static void test_notvim_resize_to_a_short_wide_screen_of_four_byte_text_is_compl
  *        main writes with terminal_write_all(), which waits and continues; a plain write() would lose the rest.
  */
 static void test_notvim_redraw_survives_a_non_blocking_stdout_and_a_slow_reader(void) {
-	assert_uniform_screen("\xf0\x9f\x98\x80", 199, 300, 300, 200, 0, 1, 200);
+	assert_uniform_screen("\xf0\x9d\x84\x9e", 199, 300, 300, 200, 0, 1, 200);
 }
 
 /** @brief When the terminal can no longer be written to, a redraw in the loop makes notvim exit with status 1 (as a failed first draw does), not 0. */
