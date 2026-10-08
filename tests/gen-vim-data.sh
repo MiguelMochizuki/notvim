@@ -23,6 +23,7 @@ let bufs = [
 \ ["a b", "", "", "c d"],
 \ ["\xe3\x81\xb2\xe3\x82\x89\xe3\x82\xab\xe3\x82\xbf\xe6\xbc\xa2\xe5\xad\x97\xed\x95\x9c\xea\xb8\x80ab", "a\xe2\x80\xa6b \xe2\x9f\xa8c\xe2\x9f\xa9 \xe2\x82\xacx \xc7\x86\xc5\xad"],
 \ ["a\xc2\xa0b c", "\xc3\xa9\xe2\x80\x93b  ", "\x01a\x7fb"],
+\ ["\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9eabc", "abcdefgh", "e\xcc\x81x\xe6\x97\xa5y", "\xe3\x80\x80z"],
 \ ]
 " Every start of the motions table: each character of each line.
 func Starts(b)
@@ -30,7 +31,7 @@ func Starts(b)
   for y in range(len(g:bufs[a:b]))
     let l = g:bufs[a:b][y]
     for x in range(len(l))
-      if and(char2nr(l[x]), 0xc0) != 0x80 | call add(r, [y, x]) | endif
+      if and(char2nr(l[x]), 0xc0) != 0x80 && strdisplaywidth('e' . nr2char(char2nr(strpart(l, x, 4)))) != 1 | call add(r, [y, x]) | endif " not on a combining mark: the cursor of Vim never rests on one
     endfor
     if l == '' | call add(r, [y, 0]) | endif
   endfor
@@ -61,8 +62,8 @@ call writefile(out, g:motions_out)
 " counts_vim.inc: {buffer, keys, count (0 = none), from line, from byte, to line, to byte, line and byte after a following j}.
 let out = ['/* Generated from the real Vim 9.1 by gen-vim-data.sh (vim -Nu NONE -es; one :normal! per count and key, then one for j):',
 \ ' * {buffer, keys, count (0 = none), from line, from byte, to line, to byte, line and byte after a j that follows}. Included by test_motions.c. */']
-" No wide (CJK) lines: notvim shows every character as one column, Vim shows them as two.
-let starts = {0: [[0,0],[0,5],[0,11],[1,0],[2,3],[2,16],[3,1],[4,2]], 12: [[0,0],[0,3],[1,2],[2,1]], 5: [[0,0],[1,4],[2,2],[3,3]], 10: [[0,1],[1,0],[2,0],[3,2]]}
+" Buffers 1, 11 and 13 have wide (CJK) cells, 13 also a combining mark: the j after each key checks the wanted column over them.
+let starts = {0: [[0,0],[0,5],[0,11],[1,0],[2,3],[2,16],[3,1],[4,2]], 12: [[0,0],[0,3],[1,2],[2,1]], 5: [[0,0],[1,4],[2,2],[3,3]], 10: [[0,1],[1,0],[2,0],[3,2]], 1: [[0,0],[2,0],[2,3],[2,7],[2,10],[3,1]], 11: [[0,0],[0,3],[0,12],[0,24],[1,1]], 13: [[0,0],[0,3],[0,6],[0,9],[1,2],[1,3],[1,5],[1,7],[2,0],[2,3],[2,4],[2,7],[3,0],[3,3]]}
 for b in sort(keys(starts), 'n')
   for key in ['h','j','k','l','w','b','e','W','B','E','0','^','$','G','gg']
     let row = []
