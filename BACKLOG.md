@@ -19,15 +19,19 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## In progress
 
-- **H0.11** As dev, I want the remaining test gaps closed where practical
-  - Done: the out-of-memory paths of `editor_load_file` and `editor_append_line` are tested. `test_runner` is linked with `-Wl,--wrap=malloc,--wrap=realloc,--wrap=strdup` and `tests/allocfail.c` makes the nth call fail once (`allocfail_after(n)`); no change in `src/`. Only the calls made by our own objects are wrapped, not the ones inside libc (`getline`, `fopen`).
-  - Decided not to test a read error halfway through a file: the directory test covers the failed read, and the cleanup of lines already loaded is the same branch the NUL case tests (H6.2). Faking `getline` and `ferror` would test the fake.
-  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
-  - Done: `screen()` can no longer inherit the pty size of an earlier test. `test_notvim_teardown()`, called from `tearDown()`, clears the size, and `screen_at()` fails with a clear message when no test spawned notvim first. The `shown_*` statics stay; an explicit view parameter on the 120 call sites was left out as too big for the gain (a story of its own if the file keeps growing).
+- **H6.12** As user, I want double-width (CJK, emoji) and combining characters to take the right number of columns
+  - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
+    notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
+    The drawn cursor column and `ESC[K` land in the wrong place too.
+  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
+    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
+  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
+  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
+    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
 
 ## To do
 
-Order of work: H0.11 (in progress), H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H7.4 and H7.5 (mouse reporting; place to be confirmed), H9.7, H9.8, and the search epic H10.
+Order of work: H6.12 (in progress), H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H7.4 and H7.5 (mouse reporting; place to be confirmed), H9.7, H9.8, and the search epic H10.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
@@ -53,15 +57,6 @@ H7.1 is done (see Done below). H7.2 and H7.3 come once yank exists (after H9.4c)
 
 Each story below was reproduced against the real binary on a pty or found by a review. H6.1 to H6.11 are done (see Done below).
 
-- **H6.12** As user, I want double-width (CJK, emoji) and combining characters to take the right number of columns
-  - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
-    notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
-    The drawn cursor column and `ESC[K` land in the wrong place too.
-  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
-    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
-  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
-  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
-    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
 - **H6.13** As dev, I want the hardening items deferred by the reviews of epic H6 closed
   - Leaving the alternate screen can wait forever on a non-blocking stdout whose reader never drains (for example output stopped with `Ctrl+S`): `terminal_write_all` polls with no timeout, and `SIGTERM` only makes `poll` return `EINTR`, which is retried.
   - A hangup followed by a key can exit 1 instead of 129 when the redraw fails before the stop pipe is polled.
@@ -211,6 +206,11 @@ Order: H9.1, H9.2, H9.5, H9.3, H9.6, H9.4a, H9.4b, H9.4c, H9.7, H9.8. Undo comes
 - **H0.10** As dev, I want objects rebuilt when an included header changes, so that a struct change cannot leave stale objects behind
   - Found while adding the cursor fields to `editor_t`: `main.o` was built against the old, smaller struct and `notvim` crashed in `editor_init`.
   - The Makefile now uses `-MMD -MP` and includes the `.d` files; `make clean` removes them.
+- **H0.11** As dev, I want the remaining test gaps closed where practical
+  - Design: the out-of-memory paths of `editor_load_file` and `editor_append_line` are tested. `test_runner` is linked with `-Wl,--wrap=malloc,--wrap=realloc,--wrap=strdup` and `tests/allocfail.c` makes the nth call fail once (`allocfail_after(n)`); no change in `src/`. Only the calls made by our own objects are wrapped, not the ones inside libc (`getline`, `fopen`).
+  - Design: `screen()` can no longer inherit the pty size of an earlier test. `test_notvim_teardown()`, called from `tearDown()`, clears the size, and `screen_at()` fails with a clear message when no test spawned notvim first. The `shown_*` statics stay; an explicit view parameter on the 120 call sites was left out as too big for the gain (a story of its own if the file keeps growing).
+  - Decisions: a read error halfway through a file is not tested: the directory test covers the failed read, and the cleanup of lines already loaded is the same branch the NUL case tests (H6.2). Faking `getline` and `ferror` would test the fake.
+  - Known gaps: the pty test cannot check that the terminal is restored (H0.5), and a crash, an ASan abort or `SIGKILL` leaves the temporary directory behind (H0.7): nothing runs after them. Left out on purpose.
 
 ### H1 Terminal and display
 
