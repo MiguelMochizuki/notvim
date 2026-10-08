@@ -23,11 +23,13 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - Reproduced: in GNU screen (80 columns) a line of 80 Japanese characters takes two rows (160 cells) and pushes the next line down a row.
     notvim counts one column per character, so it clips at 80 characters. On the last row the terminal scrolls the whole screen.
     The drawn cursor column and `ESC[K` land in the wrong place too.
-  - Proposed design: a width table in `utf8.c` (a `wcwidth`-style function: 0 for combining marks, 2 for East Asian wide and emoji, 1 otherwise),
-    with no external dependency and nothing to install. `cell_width`, `display_col`, `put_line` and `col_to_cx` use it, so clipping, the cursor and `wantcol` follow.
-  - A wide character that does not fit in the last column is left out (as a mark is today), and the row gets its `ESC[K`.
-  - Known gaps: the table must be kept up to date with Unicode, and terminals disagree on some emoji sequences (ZWJ, variation selectors).
-    Combining marks need a base character: a mark at the start of a line is shown as a cell of its own.
+  - Design: the widths come from the real Vim. `tests/gen-width-table.sh` runs `vim -Nu NONE -es` in a scratch directory and writes `src/width_table.inc`, two sorted lists of code point ranges: wide (`strdisplaywidth(c) == 2`, from U+00A0 up) and combining (`strdisplaywidth("e" . c) == 1`, a character that adds no column after a base). Surrogates and what Vim shows as `<xxxx>` are left out. Building and running notvim does not need Vim, only regenerating the file.
+  - Design: `utf8_cell_len()` covers a base character plus the combining marks that follow it, and `utf8_prev()` steps back to the base, so `h l`, Backspace, `Delete`, the word motions and `f t` treat the group as one character (Vim's composing characters). A new `utf8_cell_cols()` gives 2 for a wide base and 1 otherwise; both use a binary search over the two lists. A mark with no base (the start of a line) is a cell of its own, one column.
+  - Design: `cell_width` in `editor.c` returns `utf8_cell_cols()` for the cells that are not controls, so `display_col`, `put_line`, `col_to_cx` and `editor_scroll_cols` follow. The cursor sits on the first column of a wide cell, and `j` and `k` to a column inside a wide cell land on that cell (to be checked against Vim).
+  - Decisions: a wide cell at the screen edges follows the rule of the two-column marks such as `^A`: at the right edge it is left out when it does not fit (the row gets its `ESC[K`); at the left edge the remaining column shows a blank, so the cells after it stay in place. No `>` or `<` filler as in Vim.
+  - Decisions: ambiguous-width characters count as 1 (Vim's `ambiwidth=single`).
+  - Tests: unit tests of the width and cell functions (`日`, `😀`, `Ａ`, `e` + U+0301, a lone mark, invalid bytes, tab); editor tests of drawing, clipping at both edges, the cursor column and `wantcol`; a pty test of the reproduction above; Vim data for the cell motions on buffers with wide and combining text, added to `tests/gen-vim-data.sh`.
+  - Known gaps: zero-width and format characters (U+200B, U+200D, bidi marks, U+FEFF) are drawn raw as before, whereas Vim draws `<200b>` and so on; a follow-up story for those marks. ZWJ and flag emoji sequences are not joined (each part counts by itself). The table is Vim 9.1's snapshot of Unicode and must be regenerated to follow it.
 
 ## To do
 
