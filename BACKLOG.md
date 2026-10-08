@@ -17,19 +17,24 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 | H9 | Editing commands (as in Vim) |
 | H10 | Search and command line (as in Vim) |
 
+## In progress
+
+- **H0.11** As dev, I want the remaining test gaps closed where practical
+  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
+  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
+  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
+  - The pty `screen()` helper depends on the last spawned pty size (74 call sites); make it take the size it draws for (moved here from H6.13).
+
 ## To do
 
-Order of work: H7.1, H0.11, H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H7.4 and H7.5 (mouse reporting; place to be confirmed), H9.7, H9.8, and the search epic H10.
+Order of work: H0.11 (in progress), H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H7.4 and H7.5 (mouse reporting; place to be confirmed), H9.7, H9.8, and the search epic H10.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
 
 The user wants to scroll with the mouse wheel and still copy and paste with the mouse, and hates that yanking in Vim is local to Vim.
-H7.1 needs nothing else and goes first. H7.2 and H7.3 come once yank exists (after H9.4c).
+H7.1 is done (see Done below). H7.2 and H7.3 come once yank exists (after H9.4c).
 
-- **H7.1** As user, I want to scroll with the mouse wheel and still select text with the mouse to copy it
-  - Use alternate scroll mode: `ESC [ ? 1007 h` on entering the alternate screen and `l` on leaving. In the alternate screen the terminal turns the wheel into Up and Down arrow keys, and native selection keeps working.
-  - Do not enable mouse reporting (`?1000`, `?1002`, `?1006`): it takes clicks and drags away from the terminal, so selecting would need Shift.
 - **H7.2** As user, I want yanked text to reach the system clipboard, so yanking is not local to the editor
   - `OSC 52`: `ESC ] 52 ; c ; <base64> BEL`. It works over SSH and base64 cannot inject commands. Terminals differ (kitty, alacritty, foot, wezterm, iTerm2 yes; xterm needs a setting; some ignore it).
   - Fallback: an external tool (`wl-copy`, `xclip`, `xsel`) only if one is already installed, found at run time. Never installed by us. The editor's own register keeps working.
@@ -43,14 +48,6 @@ H7.1 needs nothing else and goes first. H7.2 and H7.3 come once yank exists (aft
   - The editor draws its own selection (a range of the text, not of the screen), scrolls while the pointer is at the top or bottom edge, and keeps it when the document is longer than the window.
   - Releasing the button copies to the system clipboard with the H7.2 path (`OSC 52`, or an installed tool).
   - Open questions: Shift+drag to get the terminal's own selection back, a double and triple click for word and line, and how the selection interacts with visual mode (H9.8).
-
-### H0 Development foundations
-
-- **H0.11** As dev, I want the remaining test gaps closed where practical
-  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
-  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
-  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
-  - The pty `screen()` helper depends on the last spawned pty size (74 call sites); make it take the size it draws for (moved here from H6.13).
 
 ### H6 Robustness with real files and terminals
 
@@ -100,6 +97,13 @@ Order: H9.1, H9.2, H9.5, H9.3, H9.6, H9.4a, H9.4b, H9.4c, H9.7, H9.8. Undo comes
   - It changes the `crlf` flag and marks the buffer modified; the next `:w` writes the new style. Check the exact behaviour against the real Vim.
 
 ## Done
+
+### H7 Mouse and clipboard
+
+- **H7.1** As user, I want to scroll with the mouse wheel and still select text with the mouse to copy it
+  - Design: alternate scroll mode (`ESC [ ? 1007 h`) is written together with the alternate screen switch in `terminal.c`, and `l` before the switch back, in the same single `terminal_write_all` call each, so enter and leave stay idempotent and a failed write leaves the state as it was. The terminal turns the wheel into Up and Down keys, which the editor already handles.
+  - Decisions: no mouse reporting (`?1000`, `?1002`, `?1006`), so clicks and drags stay with the terminal and native selection and copy keep working; the mode is turned off before leaving the alternate screen so it never outlives it.
+  - Known gaps: the wheel moves the cursor by a fixed number of lines per notch, whatever the speed (H7.4); selection is the terminal's, so it cannot go beyond the screen (H7.5); terminals that ignore `?1007` do nothing.
 
 ### H8 Motions (as in Vim)
 

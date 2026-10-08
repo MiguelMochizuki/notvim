@@ -13,12 +13,14 @@ What works today:
 - A status line on the last row: file name (or `[No Name]`), `[dos]` for a CRLF file, `[+]` once the text is changed, the mode (`NORMAL` or `INSERT`) and `line,col` at the right
 - Moving the cursor and scrolling when it leaves the screen, vertically and horizontally (one line or column at a time)
 - Drawing on the terminal's alternate screen, so the shell screen comes back untouched on exit
+- The mouse wheel scrolls (the terminal sends it as Up and Down keys on the alternate screen) and selecting text with the mouse still works as in the terminal
 - Lines wider than the terminal scroll sideways with the cursor, so nothing wraps and scrolls the screen (except double-width characters, see Known limitations); the status line keeps the absolute column
 
 Keys:
 
 | Key | Action |
 |-----|--------|
+| Mouse wheel | Same as `↑` and `↓` (alternate scroll mode); the terminal keeps selecting and copying text |
 | `←` `↓` `↑` `→` | Move the cursor (it never wraps; in insert mode it can go after the last character of a line) |
 | `h` `j` `k` `l` | The same, in normal mode only (in insert mode they are typed) |
 | `0` `^` `$` | Normal mode: go to the start of the line, its first non-blank character, its last character (after `$`, `j` and `k` stay at the end of each line) |
@@ -57,7 +59,7 @@ The full list of stories, with the design decisions behind them, is in [BACKLOG.
 | Vim motions | Done (epic finished): `0 ^ $`, `w b e W B E`, counts, `gg G`, page scrolling, `{ }`, `%`, `f t F T ; ,`. Next epic: Vim editing commands (H9) |
 | Vim editing | `a A I o O`, `x r ~`, `dd D cc C J`, operators with motions, undo and redo, yank and put, `.` repeat, visual mode |
 | Search and commands | `/ ?` and `n N`, `* #`, `:s`, `:set number`, `:e`, command-line history and editing |
-| Mouse and clipboard | Wheel scrolling that keeps native selection, yanking to the system clipboard, bracketed paste |
+| Mouse and clipboard | Done: wheel scrolling that keeps native selection. Next: yanking to the system clipboard, bracketed paste |
 
 ## Known limitations
 
