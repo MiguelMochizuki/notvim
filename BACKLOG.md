@@ -17,14 +17,32 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 | H9 | Editing commands (as in Vim) |
 | H10 | Search and command line (as in Vim) |
 
-## In progress
-
-(nothing in progress)
-
 ## To do
 
-Order of work: H0.11, H6.12, H6.13, then the Vim epics H9 and H10 and the mouse and clipboard epic H7.
+Order of work: H7.1, H0.11, H6.12, H6.13, then H9.1, H9.2, H9.5 (undo), H9.3, H9.6 (register, `yy p P`), H9.4a, H9.4b, H9.4c, then H7.2 and H7.3 (clipboard), H9.7, H9.8, and the search epic H10.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
+
+### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
+
+The user wants to scroll with the mouse wheel and still copy and paste with the mouse, and hates that yanking in Vim is local to Vim.
+H7.1 needs nothing else and goes first. H7.2 and H7.3 come once yank exists (after H9.4c).
+
+- **H7.1** As user, I want to scroll with the mouse wheel and still select text with the mouse to copy it
+  - Use alternate scroll mode: `ESC [ ? 1007 h` on entering the alternate screen and `l` on leaving. In the alternate screen the terminal turns the wheel into Up and Down arrow keys, and native selection keeps working.
+  - Do not enable mouse reporting (`?1000`, `?1002`, `?1006`): it takes clicks and drags away from the terminal, so selecting would need Shift.
+- **H7.2** As user, I want yanked text to reach the system clipboard, so yanking is not local to the editor
+  - `OSC 52`: `ESC ] 52 ; c ; <base64> BEL`. It works over SSH and base64 cannot inject commands. Terminals differ (kitty, alacritty, foot, wezterm, iTerm2 yes; xterm needs a setting; some ignore it).
+  - Fallback: an external tool (`wl-copy`, `xclip`, `xsel`) only if one is already installed, found at run time. Never installed by us. The editor's own register keeps working.
+- **H7.3** As user, I want to paste from the system clipboard as text, never as commands
+  - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
+
+### H0 Development foundations
+
+- **H0.11** As dev, I want the remaining test gaps closed where practical
+  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
+  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
+  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
+  - The pty `screen()` helper depends on the last spawned pty size (74 call sites); make it take the size it draws for (moved here from H6.13).
 
 ### H6 Robustness with real files and terminals
 
@@ -44,23 +62,22 @@ Each story below was reproduced against the real binary on a pty or found by a r
   - A hangup followed by a key can exit 1 instead of 129 when the redraw fails before the stop pipe is polled.
   - `terminal_enter_alt_screen` failing at startup is ignored by `main`.
   - A file name with control characters is printed raw in the load error message: draw it with the `^X` marks of H6.3.
-  - The out-of-memory message is printed while the alternate screen is active; the line walks and the tab loop at the right edge deserve another look; the pty `screen()` helper depends on the last spawned pty size (74 call sites).
-
-### H0 Development foundations
-
-- **H0.11** As dev, I want the remaining test gaps closed where practical
-  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
-  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
-  - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
+  - The out-of-memory message is printed while the alternate screen is active.
+  - Check, with a pty test at the right edge of the screen, that the line walks and the tab loop are right; drop this item if the test finds nothing.
 
 ### H9 Editing commands (as in Vim)
 
+Order: H9.1, H9.2, H9.5, H9.3, H9.6, H9.4a, H9.4b, H9.4c, H9.7, H9.8. Undo comes right after the first edit commands so that every later command records its change from the start. Deleted text goes to the unnamed register from H9.2 on, as in Vim.
+
 - **H9.1** As user, I want `a`, `A`, `I`, `o` and `O` to enter insert mode in the usual places
-- **H9.2** As user, I want `x`, `X`, `r{char}` and `~` to change single characters
-- **H9.3** As user, I want `dd`, `D`, `cc`, `C` and `J` to delete, change and join lines
-- **H9.4** As user, I want operators with motions (`dw`, `d$`, `cw`, `y2j`) and counts (`3dd`)
+- **H9.2** As user, I want `x`, `X`, `r{char}` and `~` to change single characters (`x` and `X` store the deleted text in the unnamed register)
 - **H9.5** As user, I want `u` and `Ctrl+r` to undo and redo, so I can fix mistakes
-- **H9.6** As user, I want `yy`, `p` and `P` and the unnamed register to copy and paste inside the editor
+- **H9.3** As user, I want `dd`, `D`, `cc`, `C` and `J` to delete, change and join lines (the deleted text goes to the unnamed register)
+- **H9.6** As user, I want `yy`, `p` and `P` to copy and paste with the unnamed register, which the deletes already fill
+- **H9.4a** As user, I want `d` with every existing motion (`dw`, `d$`, `dj`, `dG`, `de`), including the linewise and inclusive/exclusive rules
+  - The design note decides how `motions.c` tells inclusive, exclusive and linewise motions apart.
+- **H9.4b** As user, I want `c` and `y` with the same motions, including Vim's `cw` special case
+- **H9.4c** As user, I want counts with operators (`3dd`, `d3w`, `2d3w`, `y2j`)
 - **H9.7** As user, I want `.` to repeat the last change
 - **H9.8** As user, I want visual mode (`v`, `V`) with `d`, `y` and `c`
 
@@ -73,20 +90,6 @@ Each story below was reproduced against the real binary on a pty or found by a r
 - **H10.5** As user, I want `:e file` to open another file (`:w file`, `:wq`, `:x` and `ZZ` are done, see H4)
 - **H10.6** As user, I want `:set fileformat=unix` (and `dos`, and `:set fileformat?`) to convert the line endings on purpose, as in Vim, so a CRLF file can become LF
   - It changes the `crlf` flag and marks the buffer modified; the next `:w` writes the new style. Check the exact behaviour against the real Vim.
-
-### H7 Mouse and clipboard (wished for by the user, "VERY MUCH")
-
-The user wants to scroll with the mouse wheel and still copy and paste with the mouse, and hates that yanking in Vim is local to Vim.
-Do these once insert mode and yank exist.
-
-- **H7.1** As user, I want to scroll with the mouse wheel and still select text with the mouse to copy it
-  - Use alternate scroll mode: `ESC [ ? 1007 h` on entering the alternate screen and `l` on leaving. In the alternate screen the terminal turns the wheel into Up and Down arrow keys, and native selection keeps working.
-  - Do not enable mouse reporting (`?1000`, `?1002`, `?1006`): it takes clicks and drags away from the terminal, so selecting would need Shift.
-- **H7.2** As user, I want yanked text to reach the system clipboard, so yanking is not local to the editor
-  - `OSC 52`: `ESC ] 52 ; c ; <base64> BEL`. It works over SSH and base64 cannot inject commands. Terminals differ (kitty, alacritty, foot, wezterm, iTerm2 yes; xterm needs a setting; some ignore it).
-  - Fallback: an external tool (`wl-copy`, `xclip`, `xsel`) only if one is already installed, found at run time. Never installed by us. The editor's own register keeps working.
-- **H7.3** As user, I want to paste from the system clipboard as text, never as commands
-  - Bracketed paste mode (`ESC [ ? 2004 h`): pasted text arrives between `ESC[200~` and `ESC[201~`. Reading the clipboard by an `OSC 52` query is mostly disabled by terminals, so do not rely on it.
 
 ## Done
 
