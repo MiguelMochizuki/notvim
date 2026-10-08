@@ -221,6 +221,86 @@ static void test_utf8_prev_inside_a_character_gives_its_start(void) {
 	TEST_ASSERT_EQUAL_UINT(1, i4);
 }
 
+/** @brief Assert utf8_cell_cols() of @p bytes (@p len bytes, copied to an exact-size block) is @p expected. */
+static void assert_cell_cols(const char *bytes, size_t len, size_t expected) {
+	char *s = exact_copy(bytes, len);
+	size_t got = utf8_cell_cols(s);
+	free(s);
+	char msg[32];
+	snprintf(msg, sizeof(msg), "first byte 0x%02x", (unsigned char)bytes[0]);
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(expected, got, msg);
+}
+
+/** @brief Assert utf8_cell_len() of @p bytes is @p expected, on an exact-size block. */
+static void assert_cell_len(const char *bytes, size_t len, size_t expected) {
+	char *s = exact_copy(bytes, len);
+	size_t got = utf8_cell_len(s);
+	free(s);
+	char msg[32];
+	snprintf(msg, sizeof(msg), "first byte 0x%02x", (unsigned char)bytes[0]);
+	TEST_ASSERT_EQUAL_UINT_MESSAGE(expected, got, msg);
+}
+
+/** @brief East Asian wide, fullwidth and emoji characters take two columns (the widths of Vim 9.1); everything else takes one. */
+static void test_utf8_cell_cols_wide_characters_take_two_columns(void) {
+	assert_cell_cols("\xe6\x97\xa5", 3, 2);         /* U+65E5 */
+	assert_cell_cols("\xe3\x80\x80", 3, 2);         /* U+3000 ideographic space */
+	assert_cell_cols("\xef\xbc\xa1", 3, 2);         /* U+FF21 fullwidth A */
+	assert_cell_cols("\xe1\x84\x80", 3, 2);         /* U+1100 Hangul Jamo */
+	assert_cell_cols("\xf0\x9f\x98\x80", 4, 2);     /* U+1F600 */
+	assert_cell_cols("\xf0\x9f\x87\xa6", 4, 2);     /* U+1F1E6 regional indicator */
+	assert_cell_cols("\xf0\xa0\x80\x80", 4, 2);     /* U+20000 */
+}
+
+/** @brief Narrow characters, invalid bytes and the end of the string. */
+static void test_utf8_cell_cols_other_cells_take_one_column(void) {
+	assert_cell_cols("a", 1, 1);
+	assert_cell_cols("\xc3\xa9", 2, 1);             /* U+00E9 */
+	assert_cell_cols("\xc2\xa0", 2, 1);             /* U+00A0 */
+	assert_cell_cols("\xef\xbd\xa1", 3, 1);         /* U+FF61 halfwidth ideographic full stop */
+	assert_cell_cols("\xff", 1, 1);                 /* invalid byte */
+	assert_cell_cols("\xe6\x97", 2, 1);             /* truncated sequence: its first byte is a cell */
+	assert_cell_cols("", 0, 0);
+}
+
+/** @brief A cell takes the width of its base: marks after it add nothing, and a mark with no base takes one column. */
+static void test_utf8_cell_cols_ignores_the_marks_after_the_base(void) {
+	assert_cell_cols("e\xcc\x81", 3, 1);             /* e + U+0301 */
+	assert_cell_cols("\xe6\x97\xa5\xcc\x81", 5, 2); /* wide base + U+0301 */
+	assert_cell_cols("\xcc\x81", 2, 1);             /* U+0301 alone */
+}
+
+/** @brief A cell is a base character plus the combining marks that follow it. */
+static void test_utf8_cell_len_takes_the_combining_marks_after_a_base(void) {
+	assert_cell_len("e\xcc\x81x", 4, 3);                 /* e + U+0301, then x */
+	assert_cell_len("e\xcc\x81\xcc\x82", 5, 5);          /* two marks */
+	assert_cell_len("\xe6\x97\xa5\xcc\x81", 5, 5);       /* wide base */
+	assert_cell_len("\xcc\x81x", 3, 2);                  /* a mark with no base is a cell of its own */
+	assert_cell_len("\xcc\x81\xcc\x82", 4, 2);           /* and a second mark after it is the next cell */
+	assert_cell_len("a\xff\xcc\x81", 4, 1);              /* an invalid byte is no base */
+	assert_cell_len("e\xff\xcc\x81", 4, 1);              /* and does not let a mark through */
+}
+
+/** @brief A tab, an ASCII control (drawn as ^A) and a C1 control (drawn as ?) take no marks: the mark is a cell of its own. */
+static void test_utf8_cell_len_gives_no_marks_to_controls(void) {
+	assert_cell_len("\t\xcc\x81", 3, 1);
+	assert_cell_len("\x01\xcc\x81", 3, 1);
+	assert_cell_len("\x7f\xcc\x81", 3, 1);
+	assert_cell_len("\xc2\x85\xcc\x81", 4, 2);
+}
+
+/** @brief Stepping back lands on the base of a cell, from after it or from inside its marks. */
+static void test_utf8_prev_steps_back_over_the_marks_of_a_cell(void) {
+	char *s = exact_copy("xe\xcc\x81\xcc\x82y", 8);     /* x, e + two marks (bytes 1 to 5), y at 6; 8 bytes */
+	size_t at6 = utf8_prev(s, 6), at5 = utf8_prev(s, 5), at3 = utf8_prev(s, 3), at2 = utf8_prev(s, 2), at1 = utf8_prev(s, 1);
+	free(s);
+	TEST_ASSERT_EQUAL_UINT(1, at6); /* after the group: its base */
+	TEST_ASSERT_EQUAL_UINT(1, at5); /* inside the second mark */
+	TEST_ASSERT_EQUAL_UINT(1, at3); /* after the first mark */
+	TEST_ASSERT_EQUAL_UINT(1, at2); /* inside the first mark */
+	TEST_ASSERT_EQUAL_UINT(0, at1); /* after x */
+}
+
 /** @brief The old utf8_prev(): walk forward from the start of the line, the definition of a cell. */
 static size_t reference_prev(const char *line, size_t i) {
 	size_t start = 0, pos = 0;
@@ -231,24 +311,34 @@ static size_t reference_prev(const char *line, size_t i) {
 	return start;
 }
 
-/** @brief The constant time utf8_prev() agrees with the forward walk for every index of every string up to 5 bytes over a byte set that covers each UTF-8 boundary. */
-static void test_utf8_prev_agrees_with_the_forward_walk(void) {
-	static const unsigned char set[] = {'a', 0x7f, 0x80, 0xbf, 0xc0, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0xf5, 0xff, 0x90, 0xa0};
-	enum { N = sizeof set, MAXLEN = 5 };
-	for (size_t len = 1; len <= MAXLEN; len++) {
+/** @brief Assert utf8_prev() agrees with the forward walk for every index of every string of 1 to @p maxlen bytes over the @p n bytes of @p set. */
+static void assert_prev_agrees_over(const unsigned char *set, size_t n, size_t maxlen) {
+	for (size_t len = 1; len <= maxlen; len++) {
 		size_t total = 1;
-		for (size_t k = 0; k < len; k++) total *= N;
+		for (size_t k = 0; k < len; k++) total *= n;
 		for (size_t code = 0; code < total; code++) {
 			char *s = malloc(len + 1);
 			TEST_ASSERT_NOT_NULL(s);
 			size_t c = code;
-			for (size_t k = 0; k < len; k++, c /= N) s[k] = (char)set[c % N];
+			for (size_t k = 0; k < len; k++, c /= n) s[k] = (char)set[c % n];
 			s[len] = '\0';
 			for (size_t i = 0; i <= len; i++)
 				if (utf8_prev(s, i) != reference_prev(s, i)) TEST_FAIL_MESSAGE("utf8_prev differs from the forward walk");
 			free(s);
 		}
 	}
+}
+
+/** @brief utf8_prev() agrees with the forward walk for every index of every string up to 5 bytes over a byte set that covers each UTF-8 boundary. */
+static void test_utf8_prev_agrees_with_the_forward_walk(void) {
+	static const unsigned char set[] = {'a', 0x7f, 0x80, 0xbf, 0xc0, 0xc2, 0xdf, 0xe0, 0xed, 0xef, 0xf0, 0xf4, 0xf5, 0xff, 0x90, 0xa0};
+	assert_prev_agrees_over(set, sizeof set, 5);
+}
+
+/** @brief The same with combining marks (U+0301, U+0302), a tab, a C1 control, a wide character, an invalid byte and a stray continuation byte: every way a mark can follow or not follow a base. */
+static void test_utf8_prev_agrees_with_the_forward_walk_with_marks(void) {
+	static const unsigned char set[] = {'a', '\t', 0xc2, 0x85, 0xcc, 0x81, 0x82, 0xe6, 0x97, 0xa5, 0xff};
+	assert_prev_agrees_over(set, sizeof set, 5);
 }
 
 /** @brief Register every test in this file with Unity. */
@@ -269,4 +359,11 @@ void test_utf8_suite(void) {
 	RUN_TEST(test_utf8_prev_with_a_stray_continuation_byte_after_a_character);
 	RUN_TEST(test_utf8_prev_inside_a_character_gives_its_start);
 	RUN_TEST(test_utf8_prev_agrees_with_the_forward_walk);
+	RUN_TEST(test_utf8_prev_agrees_with_the_forward_walk_with_marks);
+	RUN_TEST(test_utf8_cell_cols_wide_characters_take_two_columns);
+	RUN_TEST(test_utf8_cell_cols_other_cells_take_one_column);
+	RUN_TEST(test_utf8_cell_cols_ignores_the_marks_after_the_base);
+	RUN_TEST(test_utf8_cell_len_takes_the_combining_marks_after_a_base);
+	RUN_TEST(test_utf8_cell_len_gives_no_marks_to_controls);
+	RUN_TEST(test_utf8_prev_steps_back_over_the_marks_of_a_cell);
 }

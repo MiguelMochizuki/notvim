@@ -35,6 +35,18 @@ size_t utf8_valid_len(const char *s);
 size_t utf8_cell_len(const char *s);
 
 /**
+ * @brief Number of terminal columns of the cell at the start of @p s, not counting a tab or a control mark (the editor draws those).
+ *
+ * A cell takes the width of its base character: 2 for a wide character (East Asian wide
+ * and fullwidth, emoji), 1 for any other, for an invalid byte and for a combining mark with
+ * no base. The combining marks after the base add nothing. The widths are the ones of Vim.
+ *
+ * @param s NUL-terminated string; must not be NULL.
+ * @return 1 or 2, or 0 only if @p s is empty.
+ */
+size_t utf8_cell_cols(const char *s);
+
+/**
  * @brief Whether @p s starts with a C1 control character, U+0080 to U+009F (bytes 0xC2 0x80 to 0xC2 0x9F).
  *
  * Some terminals act on these (U+009B is a CSI), so the editor does not draw them.
