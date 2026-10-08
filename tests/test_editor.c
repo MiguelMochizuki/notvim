@@ -14,6 +14,7 @@
 #include "keys.h"
 #include "tmpdir.h"
 #include "drawfmt.h"
+#include "allocfail.h"
 
 /** A row limit larger than any test editor, for tests that are not about the limit. */
 #define ALL_ROWS 1000
@@ -313,6 +314,58 @@ static void test_editor_load_directory_fails_with_eisdir(void) {
 	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, tmpdir_path(".")));
 	TEST_ASSERT_EQUAL_INT(EISDIR, errno);
 	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+}
+
+/** @brief When the copy of the text cannot be allocated, append fails with ENOMEM and the editor keeps its lines. */
+static void test_editor_append_line_fails_cleanly_when_the_copy_cannot_be_allocated(void) {
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "old"));
+	allocfail_after(0);
+	TEST_ASSERT_EQUAL_INT(-1, editor_append_line(&e, "new"));
+	allocfail_reset();
+	TEST_ASSERT_EQUAL_INT(ENOMEM, errno);
+	TEST_ASSERT_EQUAL_UINT(1, editor_line_count(&e));
+	assert_line(&e, 0, "old");
+}
+
+/** @brief When the array of lines cannot grow, append fails, frees the copy it made (the sanitizer reports a leak otherwise) and adds nothing. */
+static void test_editor_append_line_frees_the_copy_when_the_array_cannot_grow(void) {
+	editor_init(&e);
+	allocfail_after(1); /* the copy succeeds, the first growth of the array fails */
+	TEST_ASSERT_EQUAL_INT(-1, editor_append_line(&e, "new"));
+	allocfail_reset();
+	TEST_ASSERT_EQUAL_INT(ENOMEM, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "again")); /* and the editor is still usable */
+	assert_line(&e, 0, "again");
+}
+
+/** @brief When the copy of the path cannot be allocated, load fails with ENOMEM and leaves the editor empty, as for any failed load. */
+static void test_editor_load_fails_with_enomem_when_the_path_cannot_be_copied(void) {
+	const char *path = tmpdir_write("a.txt", "x\n");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_init(&e);
+	TEST_ASSERT_EQUAL_INT(0, editor_append_line(&e, "old"));
+	allocfail_after(0);
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	allocfail_reset();
+	TEST_ASSERT_EQUAL_INT(ENOMEM, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_NULL(e.path);
+}
+
+/** @brief When a line cannot be stored halfway through a file, load frees the lines already read and the path, and fails with ENOMEM. */
+static void test_editor_load_frees_everything_when_a_line_cannot_be_stored(void) {
+	const char *path = tmpdir_write("a.txt", "one\ntwo\nthree\n");
+	TEST_ASSERT_NOT_NULL(path);
+	editor_init(&e);
+	allocfail_after(3); /* path copy, first line, array of lines succeed; the second line fails */
+	TEST_ASSERT_EQUAL_INT(-1, editor_load_file(&e, path));
+	allocfail_reset();
+	TEST_ASSERT_EQUAL_INT(ENOMEM, errno);
+	TEST_ASSERT_EQUAL_UINT(0, editor_line_count(&e));
+	TEST_ASSERT_NULL(e.path);
+	TEST_ASSERT_EQUAL_INT(0, e.crlf);
 }
 
 /** @brief An unreadable file fails with EACCES and leaves the editor empty. */
@@ -4139,6 +4192,10 @@ void test_editor_suite(void) {
 	RUN_TEST(test_editor_load_missing_file_is_empty_and_not_created);
 	RUN_TEST(test_editor_load_missing_file_discards_old_contents);
 	RUN_TEST(test_editor_load_directory_fails_with_eisdir);
+	RUN_TEST(test_editor_append_line_fails_cleanly_when_the_copy_cannot_be_allocated);
+	RUN_TEST(test_editor_append_line_frees_the_copy_when_the_array_cannot_grow);
+	RUN_TEST(test_editor_load_fails_with_enomem_when_the_path_cannot_be_copied);
+	RUN_TEST(test_editor_load_frees_everything_when_a_line_cannot_be_stored);
 	RUN_TEST(test_editor_load_unreadable_file_fails_with_eacces);
 	RUN_TEST(test_editor_load_refuses_a_nul_byte_in_a_line);
 	RUN_TEST(test_editor_load_refuses_a_nul_after_good_lines);

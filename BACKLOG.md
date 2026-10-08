@@ -20,8 +20,8 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 ## In progress
 
 - **H0.11** As dev, I want the remaining test gaps closed where practical
-  - The out-of-memory path of `editor_load_file` and `editor_append_line` is not tested.
-  - The cleanup of a half-loaded editor is now tested through the NUL case (H6.2); a real read error halfway through a file still is not.
+  - Done: the out-of-memory paths of `editor_load_file` and `editor_append_line` are tested. `test_runner` is linked with `-Wl,--wrap=malloc,--wrap=realloc,--wrap=strdup` and `tests/allocfail.c` makes the nth call fail once (`allocfail_after(n)`); no change in `src/`. Only the calls made by our own objects are wrapped, not the ones inside libc (`getline`, `fopen`).
+  - Decided not to test a read error halfway through a file: the directory test covers the failed read, and the cleanup of lines already loaded is the same branch the NUL case tests (H6.2). Faking `getline` and `ferror` would test the fake.
   - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
   - The pty `screen()` helper depends on the last spawned pty size (74 call sites); make it take the size it draws for (moved here from H6.13).
 

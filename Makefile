@@ -6,6 +6,7 @@
 # 	- Builds use AddressSanitizer + UBSan (memory errors and leaks fail the run).
 # 	  Disable with `make clean && make SAN=`; run `make clean` after changing SAN.
 # 	- Objects are rebuilt when an included header changes (-MMD).
+# 	- test_runner is linked with --wrap=malloc,realloc,strdup (tests/allocfail.c) so tests can make an allocation fail.
 # 	- make check-eol: fails if a tracked text file contains a carriage return (the repo is LF only; make test runs it).
 CC 			= gcc
 SAN 		?= -fsanitize=address,undefined -fno-omit-frame-pointer
@@ -42,7 +43,7 @@ test: check-eol notvim test_runner
 	./test_runner
 
 test_runner: $(OBJS_LIB) $(TEST_OBJS) $(UNITY_OBJS)
-	$(CC) $(CFLAGS) -o $@ $^ -lutil
+	$(CC) $(CFLAGS) -Wl,--wrap=malloc,--wrap=realloc,--wrap=strdup -o $@ $^ -lutil
 
 clean:
 	rm -f notvim test_runner
