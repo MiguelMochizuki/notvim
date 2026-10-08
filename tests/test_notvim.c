@@ -2285,6 +2285,46 @@ static int quit_with_keys(int master, pid_t pid, const char *keys, char *last, s
 	return wait_exit(pid);
 }
 
+/** @brief Reproduction of H6.12: a line of 80 wide characters (160 columns) is clipped at 80 columns, so it fills one row and does not push the next lines down. */
+static void test_notvim_wide_characters_fill_the_row_without_pushing_the_next_ones_down(void) {
+	static char content[1024], text[1024], expected[2048], first[2048];
+	content[0] = text[0] = '\0';
+	append_repeated(content, "\xe6\x97\xa5", 80); /* 80 wide characters */
+	strcat(content, "\nsecond\nthird\n");
+	append_repeated(text, "\xe6\x97\xa5", 40); /* 40 of them fill the 80 columns */
+	strcat(text, "\r\nsecond\r\nthird");
+	const char *path = tmpdir_write("wide.txt", content);
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, first, sizeof(first));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	first_screen(expected, sizeof(expected), text, 1, 1);
+	TEST_ASSERT_EQUAL_STRING(expected, first);
+}
+
+/** @brief The cursor moves one wide character at a time, sits on its first column, and the status line shows that column. */
+static void test_notvim_cursor_moves_over_wide_characters(void) {
+	static char expected[2048], out[2048];
+	const char *path = tmpdir_write("wide.txt", "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e\n");
+	TEST_ASSERT_NOT_NULL(path);
+	int master;
+	pid_t pid = spawn_notvim(path, 24, &master);
+	int raw = wait_until_raw(master);
+	read_output(master, out, sizeof(out));
+	send_and_read(master, "l", out, sizeof(out));
+	int status = quit_and_wait(master, pid);
+	close(master);
+	TEST_ASSERT_TRUE(raw);
+	TEST_ASSERT_EQUAL_INT(0, status);
+	screen_at(expected, sizeof(expected), "\xe6\x97\xa5\xe6\x9c\xac\xe8\xaa\x9e", 1, 3, 1, 3); /* the second wide character starts at column 3 */
+	TEST_ASSERT_EQUAL_STRING(expected, out);
+}
+
 /** @brief Assert that @p out ends with the switch back from the alternate screen and holds the other one nowhere else. */
 static void assert_left_alt_screen(const char *out) {
 	size_t n = strlen(out), m = strlen(ALT_LEAVE);
@@ -2431,6 +2471,8 @@ void test_notvim_suite(void) {
 	RUN_TEST(test_notvim_full_screen_of_two_byte_text_is_not_truncated);
 	RUN_TEST(test_notvim_full_screen_of_three_byte_text_is_not_truncated);
 	RUN_TEST(test_notvim_full_screen_of_four_byte_text_is_not_truncated);
+	RUN_TEST(test_notvim_wide_characters_fill_the_row_without_pushing_the_next_ones_down);
+	RUN_TEST(test_notvim_cursor_moves_over_wide_characters);
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_two_byte_text);
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_three_byte_text);
 	RUN_TEST(test_notvim_resize_draws_a_full_screen_of_four_byte_text);

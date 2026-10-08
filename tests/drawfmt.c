@@ -5,11 +5,12 @@
 #include <stdio.h>
 #include <string.h>
 #include "drawfmt.h"
+#include "utf8.h"
 
-/** @brief Number of UTF-8 characters in the first @p len bytes of @p s: its display width once rendered. */
+/** @brief Display width of the first @p len bytes of @p s, which are text already rendered (no tab, no control byte): one column per character, two for a wide one. */
 static size_t width_of(const char *s, size_t len) {
 	size_t w = 0;
-	for (size_t i = 0; i < len; i++) if (((unsigned char)s[i] & 0xc0) != 0x80) w++;
+	for (size_t i = 0; i < len; i += utf8_cell_len(s + i)) w += utf8_cell_cols(s + i);
 	return w;
 }
 
