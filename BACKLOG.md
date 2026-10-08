@@ -23,7 +23,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
   - Done: the out-of-memory paths of `editor_load_file` and `editor_append_line` are tested. `test_runner` is linked with `-Wl,--wrap=malloc,--wrap=realloc,--wrap=strdup` and `tests/allocfail.c` makes the nth call fail once (`allocfail_after(n)`); no change in `src/`. Only the calls made by our own objects are wrapped, not the ones inside libc (`getline`, `fopen`).
   - Decided not to test a read error halfway through a file: the directory test covers the failed read, and the cleanup of lines already loaded is the same branch the NUL case tests (H6.2). Faking `getline` and `ferror` would test the fake.
   - The pty test cannot check that the terminal is restored (H0.5), and a crash leaves the temporary directory behind (H0.7).
-  - The pty `screen()` helper depends on the last spawned pty size (74 call sites); make it take the size it draws for (moved here from H6.13).
+  - Done: `screen()` can no longer inherit the pty size of an earlier test. `test_notvim_teardown()`, called from `tearDown()`, clears the size, and `screen_at()` fails with a clear message when no test spawned notvim first. The `shown_*` statics stay; an explicit view parameter on the 120 call sites was left out as too big for the gain (a story of its own if the file keeps growing).
 
 ## To do
 

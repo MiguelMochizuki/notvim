@@ -23,6 +23,7 @@ void tearDown(void) {
 	test_editor_teardown();
 	test_writer_teardown();
 	test_motions_teardown();
+	test_notvim_teardown();
 	tmpdir_destroy();
 }
 

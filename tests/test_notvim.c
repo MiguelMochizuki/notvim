@@ -20,8 +20,12 @@
 #include "tmpdir.h"
 #include "drawfmt.h"
 
-/** Size of the pty of the last spawn_notvim_size() or set_size(): screen() draws for it (a full row gets no erase, a short screen is erased below). */
-static unsigned short term_rows = 24, term_cols = 80;
+/** Size of the pty of the last spawn_notvim_size() or set_size(): screen() draws for it (a full row gets no erase, a short screen is erased below). 0 until a test spawns; test_notvim_teardown() clears it. */
+static unsigned short term_rows, term_cols;
+
+void test_notvim_teardown(void) {
+	term_rows = term_cols = 0;
+}
 /** Name notvim shows in its status line: the file given to the last spawn_notvim_full(), or "[No Name]". A copy: tmpdir_write() reuses its buffer. */
 static char shown_name[1024] = "[No Name]";
 /** Whether the file of the last spawn is shown as a CRLF file: a test that loads one sets it after the spawn. */
@@ -156,6 +160,7 @@ static int quit_and_wait(int master, pid_t pid) {
  */
 static void screen_at(char *buf, size_t size, const char *text, int row, int col, int line, int fcol) {
 	char status[1024];
+	TEST_ASSERT_TRUE_MESSAGE(term_rows > 0 && term_cols > 0, "screen() before any spawn: the size would come from an earlier test");
 	if (term_rows < 2) {
 		draw_expected(buf, size, text, term_rows, term_cols, row, col);
 		return;
