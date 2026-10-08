@@ -23,7 +23,7 @@ Under a story, **Design** is how it was built, **Decisions** are the choices beh
 
 ## To do
 
-Order of work: H0.11, H6.12, H6.13, then the Vim epics H8 to H10 and the mouse and clipboard epic H7.
+Order of work: H0.11, H6.12, H6.13, then the Vim epics H9 and H10 and the mouse and clipboard epic H7.
 Where a story is "as Vim does", the behaviour is checked against the real Vim installed on this machine (read-only, never installed by us).
 
 ### H6 Robustness with real files and terminals
@@ -70,7 +70,7 @@ Each story below was reproduced against the real binary on a pty or found by a r
 - **H10.2** As user, I want `*` and `#` to search for the word under the cursor
 - **H10.3** As user, I want `:s` and `:%s` to substitute text
 - **H10.4** As user, I want `:set number` to show line numbers
-- **H10.5** As user, I want `:e file`, `:w file`, `:wq`, `:x` and `ZZ`
+- **H10.5** As user, I want `:e file` to open another file (`:w file`, `:wq`, `:x` and `ZZ` are done, see H4)
 - **H10.6** As user, I want `:set fileformat=unix` (and `dos`, and `:set fileformat?`) to convert the line endings on purpose, as in Vim, so a CRLF file can become LF
   - It changes the `crlf` flag and marks the buffer modified; the next `:w` writes the new style. Check the exact behaviour against the real Vim.
 
