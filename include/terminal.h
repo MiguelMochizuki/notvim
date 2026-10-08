@@ -46,6 +46,8 @@ void terminal_leave_raw(int fd);
  *
  * The editor draws there, so the shell screen and its scrollback are left
  * untouched until terminal_leave_alt_screen(). Does nothing if already active.
+ * It also turns on alternate scroll mode (?1007), so the terminal sends the
+ * mouse wheel as Up and Down keys and still lets the user select text.
  * The sequence is written with terminal_write_all(); if that fails the screen
  * is not considered active.
  *
@@ -56,8 +58,8 @@ void terminal_enter_alt_screen(int fd);
 /**
  * @brief Switch back from the alternate screen buffer, restoring the shell screen.
  *
- * Does nothing if terminal_enter_alt_screen() was not called, so it is safe
- * to call twice. The sequence is written with terminal_write_all(), so a
+ * Turns alternate scroll mode off first. Does nothing if
+ * terminal_enter_alt_screen() was not called, so it is safe to call twice. The sequence is written with terminal_write_all(), so a
  * non-blocking descriptor with a full buffer is waited for; if the write
  * fails the screen stays marked active.
  *

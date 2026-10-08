@@ -46,10 +46,10 @@ void terminal_get_size(int fd, int *rows, int *cols) {
 	*cols = ok && ws.ws_col > 0 ? ws.ws_col : TERMINAL_DEFAULT_COLS;
 }
 
-/** Switch to the alternate screen buffer. */
-#define ALT_SCREEN_ENTER "\x1b[?1049h"
-/** Switch back to the normal screen buffer. */
-#define ALT_SCREEN_LEAVE "\x1b[?1049l"
+/** Switch to the alternate screen buffer, where the terminal turns the mouse wheel into Up and Down keys (alternate scroll mode, ?1007). */
+#define ALT_SCREEN_ENTER "\x1b[?1049h\x1b[?1007h"
+/** Switch back to the normal screen buffer, after turning alternate scroll mode off. */
+#define ALT_SCREEN_LEAVE "\x1b[?1007l\x1b[?1049l"
 
 /** Non-zero while the alternate screen is active; makes enter/leave idempotent. */
 static int alt_active = 0;

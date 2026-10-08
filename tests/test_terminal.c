@@ -230,7 +230,7 @@ static void test_terminal_enter_alt_screen_writes_once(void) {
 	terminal_leave_alt_screen(slave); /* leave the shared state clean before asserting */
 	close(master);
 	close(slave);
-	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h", first);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h\x1b[?1007h", first);
 	TEST_ASSERT_EQUAL_STRING("", second);
 }
 
@@ -250,8 +250,8 @@ static void test_terminal_leave_alt_screen_writes_once_after_enter(void) {
 	close(master);
 	close(slave);
 	TEST_ASSERT_EQUAL_STRING("", before);
-	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h", entered);
-	TEST_ASSERT_EQUAL_STRING("\x1b[?1049l", left);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1049h\x1b[?1007h", entered);
+	TEST_ASSERT_EQUAL_STRING("\x1b[?1007l\x1b[?1049l", left);
 	TEST_ASSERT_EQUAL_STRING("", again);
 }
 

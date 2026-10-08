@@ -169,9 +169,9 @@ static void screen(char *buf, size_t size, const char *text, int row, int col) {
 	screen_at(buf, size, text, row, col, row, col);
 }
 
-/** Sequences notvim writes when it enters and leaves the alternate screen. */
-#define ALT_ENTER "\x1b[?1049h"
-#define ALT_LEAVE "\x1b[?1049l"
+/** Sequences notvim writes when it enters and leaves the alternate screen; ?1007 turns the mouse wheel into Up and Down keys there. */
+#define ALT_ENTER "\x1b[?1049h\x1b[?1007h"
+#define ALT_LEAVE "\x1b[?1007l\x1b[?1049l"
 
 /** @brief Like screen(), preceded by the switch to the alternate screen: what notvim writes first. */
 static void first_screen(char *buf, size_t size, const char *text, int row, int col) {
@@ -1922,8 +1922,8 @@ static void test_notvim_draw_buffer_holds_the_status_line_of_four_byte_text(void
 	write_emoji_file(path, sizeof(path));
 	int master;
 	pid_t pid = spawn_notvim_size(path, 3, 60, &master);
-	emoji_screen(expected + 8, sizeof(expected) - 8, path);
-	memcpy(expected, ALT_ENTER, 8);
+	emoji_screen(expected + sizeof(ALT_ENTER) - 1, sizeof(expected) - (sizeof(ALT_ENTER) - 1), path);
+	memcpy(expected, ALT_ENTER, sizeof(ALT_ENTER) - 1);
 	int raw = wait_until_raw(master);
 	read_output(master, first, sizeof(first));
 	int status = quit_and_wait(master, pid);
